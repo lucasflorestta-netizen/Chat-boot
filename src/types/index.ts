@@ -60,6 +60,8 @@ export interface Message {
   media_name: string | null;
   is_deleted: boolean;
   original_body: string | null;
+  whatsapp_delivered: boolean;
+  whatsapp_message_id: string | null;
   created_at: string;
   sender?: Profile | null;
 }

@@ -1,15 +1,16 @@
 import { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { Headphones, Loader2, Mail, Lock, User, AlertCircle } from 'lucide-react';
+import { Headphones, Loader2, Mail, Lock, User, AlertCircle, RefreshCw } from 'lucide-react';
 
 export function AuthScreen() {
-  const { signIn, signUp } = useAuth();
+  const { signIn, signUp, session, profileError, refreshProfile } = useAuth();
   const [mode, setMode] = useState<'signin' | 'signup'>('signin');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [retrying, setRetrying] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -22,6 +23,28 @@ export function AuthScreen() {
     setLoading(false);
     if (result.error) setError(result.error);
   };
+
+  const handleRetryProfile = async () => {
+    setRetrying(true);
+    await refreshProfile();
+    setRetrying(false);
+  };
+
+  if (session && profileError) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-ink-950 px-4">
+        <div className="card p-8 max-w-md w-full text-center">
+          <AlertCircle className="w-12 h-12 text-warning-400 mx-auto mb-4" />
+          <h2 className="text-lg font-semibold text-white mb-2">Problema ao carregar perfil</h2>
+          <p className="text-sm text-ink-300 mb-4">{profileError}</p>
+          <button onClick={handleRetryProfile} disabled={retrying} className="btn-primary w-full">
+            {retrying ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+            Tentar novamente
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-ink-950 px-4">

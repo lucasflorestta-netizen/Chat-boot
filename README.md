@@ -56,6 +56,15 @@ src/
         ├── AutoMessagesView.tsx # Configuração de mensagens automáticas
         ├── TagsView.tsx         # Gestão de etiquetas
         └── CannedView.tsx       # Respostas rápidas (canned responses)
+
+services/
+└── whatsapp-bridge/             # Serviço Node.js + Baileys (conexão WhatsApp 24/7)
+
+supabase/
+├── functions/
+│   ├── admin-create-user/       # Edge Function: criar usuários (admin)
+│   └── admin-delete-user/       # Edge Function: remover usuários (admin)
+└── migrations/                  # Schema PostgreSQL + RLS + Storage
 ```
 
 ### Padrões Arquiteturais
@@ -132,7 +141,7 @@ App.tsx
 ### Fluxo de Dados em Tempo Real
 
 1. Cliente envia mensagem no WhatsApp
-2. Webhook (Edge Function) recebe a mensagem e insere no banco
+2. WhatsApp Bridge recebe via Baileys e insere no banco (`messages`, `tickets`)
 3. Supabase Realtime notifica o frontend via WebSocket
 4. Hook `useMessages` atualiza a lista de mensagens
 5. Hook `useNotifications` dispara alerta visual + sonoro
@@ -202,29 +211,64 @@ App.tsx
 
 ### Pré-requisitos
 
-- Node.js 18+
-- As variáveis de ambiente do Supabase já estão configuradas em `.env`:
-  - `VITE_SUPABASE_URL`
-  - `VITE_SUPABASE_ANON_KEY`
+- Node.js 20+
+- Conta Supabase com projeto criado
+- Supabase CLI (`supabase link`, `supabase db push`)
+
+### Variáveis de ambiente
+
+Copie `.env.example` para `.env` na raiz:
+
+```bash
+VITE_SUPABASE_URL=https://seu-projeto.supabase.co
+VITE_SUPABASE_ANON_KEY=sua-chave-anon
+```
+
+Para o WhatsApp Bridge, copie `services/whatsapp-bridge/.env.example` para `services/whatsapp-bridge/.env`:
+
+```bash
+SUPABASE_URL=https://seu-projeto.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=sua-service-role-key
+BRIDGE_POLL_INTERVAL_MS=5000
+```
 
 ### Instalação
 
 ```bash
 npm install
+cd services/whatsapp-bridge && npm install && cd ../..
 ```
 
-### Desenvolvimento
+### Banco de dados e Edge Functions
 
+```bash
+supabase db push
+supabase functions deploy admin-create-user
+supabase functions deploy admin-delete-user
+```
+
+### Desenvolvimento (3 terminais)
+
+**Terminal 1 — Frontend:**
 ```bash
 npm run dev
 ```
 
-O servidor de desenvolvimento iniciará automaticamente.
+**Terminal 2 — WhatsApp Bridge:**
+```bash
+npm run whatsapp:bridge:dev
+```
+
+**Terminal 3 (opcional) — Supabase local:**
+```bash
+supabase start
+```
 
 ### Build de Produção
 
 ```bash
 npm run build
+npm run whatsapp:bridge:build
 ```
 
 ### Verificação de Tipos
@@ -235,69 +279,111 @@ npm run typecheck
 
 ### Primeiro Acesso
 
-1. Acesse o sistema no navegador
+1. Acesse o sistema no navegador (`http://localhost:5173`)
 2. Clique em "Cadastrar" para criar a primeira conta
 3. O primeiro usuário se torna **Administrador** automaticamente
-4. Após o login, você terá acesso a todas as funcionalidades
-5. Crie agentes em "Usuários" e configure seus departamentos
+4. Inicie o WhatsApp Bridge (`npm run whatsapp:bridge:dev`)
+5. Vá em "Conexão WhatsApp" → "Gerar QR Code" → escaneie com o celular
+6. Crie agentes em "Usuários" e configure seus departamentos
+
+### Test plan (aceitação manual)
+
+1. **Auth:** primeiro signup vira admin; admin cria agente sem deslogar
+2. **Chat:** enviar texto e imagem; mídia aparece com URL válida
+3. **Realtime:** abrir 2 abas; mensagem em uma aparece na outra
+4. **WhatsApp:** gerar QR real, escanear, receber mensagem → ticket em triagem
+5. **Bot:** cliente digita `1` → ticket vai para suporte
+6. **Outbound:** agente responde no chat → mensagem chega no WhatsApp
+7. **Agendada:** agendar mensagem → enviada no horário pelo bridge
+8. **NPS:** finalizar ticket → pergunta NPS; resposta 1-5 salva
+9. **Badge:** contador de não lidas reflete na sidebar
 
 ---
 
 ## Integração com WhatsApp
 
-### Arquitetura da Integração
+### Arquitetura
 
-A integração com WhatsApp utiliza a biblioteca **Baileys** (ou Venom) para conectar ao WhatsApp Web via API. O fluxo completo em produção é:
+O Baileys exige uma conexão WebSocket **persistente 24/7**, portanto roda em um serviço Node.js dedicado (`services/whatsapp-bridge/`), não em Edge Functions serverless.
+
+```
+Frontend (Vite)  ──►  Supabase (DB + Realtime + Storage)
+                            ▲
+WhatsApp Bridge  ───────────┘  (service role key)
+       │
+       ▼
+ WhatsApp Servers
+```
+
+**Componentes:**
+
+| Componente | Responsabilidade |
+|---|---|
+| `services/whatsapp-bridge/` | Conexão Baileys, QR Code, inbound/outbound, bot, agendamento |
+| `supabase/functions/admin-create-user` | Criar usuários (admin only, service role) |
+| `supabase/functions/admin-delete-user` | Remover usuários do Auth |
+| `whatsapp_connection` (tabela) | Controle de estado: disconnected → syncing → connected |
+| `messages.whatsapp_delivered` | Fila de mensagens pendentes para envio ao WhatsApp |
+
+### Fluxo completo
 
 1. **Conexão:**
-   - O admin gera o QR Code na tela "Conexão WhatsApp"
-   - A Edge Function do Supabase inicia uma sessão Baileys
-   - O QR Code é exibido no frontend
-   - O admin escaneia com o WhatsApp Mobile → conexão estabelecida
+   - Admin clica "Gerar QR Code" → `whatsapp_connection.status = 'syncing'`
+   - Bridge detecta via Realtime e inicia sessão Baileys
+   - QR é salvo em `whatsapp_connection.qr_code` → frontend renderiza com `qrcode.react`
+   - Após escanear → `status = 'connected'`, `phone_number` preenchido
 
-2. **Recebimento de Mensagens:**
-   - Mensagens recebidas no WhatsApp disparam um webhook
-   - A Edge Function processa a mensagem:
-     - Se o contato não existe, cria na tabela `contacts`
-     - Se não há ticket ativo, cria um novo ticket em `triage`
-     - Se o bot estiver ativo, envia a mensagem de boas-vindas e menu
-     - Se o cliente digitar "1" ou "2", categoriza o ticket no departamento correspondente
-     - Insere a mensagem na tabela `messages`
+2. **Recebimento:**
+   - Mensagem WhatsApp → bridge cria/atualiza `contacts`, `tickets`, `messages`
+   - Bot envia saudação + menu se ticket em triagem
+   - Cliente digita `1` ou `2` → departamento atualizado
 
-3. **Envio de Mensagens:**
-   - Quando o agente envia uma mensagem no chat, ela é inserida no banco
-   - A Edge Function detecta a nova mensagem e a envia via Baileys para o WhatsApp do cliente
+3. **Envio:**
+   - Agente insere mensagem com `whatsapp_delivered = false`
+   - Bridge faz poll e envia via Baileys → marca `whatsapp_delivered = true`
 
-4. **Mensagem Apagada:**
-   - Se o cliente apaga uma mensagem no WhatsApp, o webhook recebe o evento
-   - A Edge Function marca `is_deleted = true` e preserva `original_body`
-   - O frontend exibe a tag "Mensagem apagada pelo cliente" com o conteúdo original
+4. **Mensagem apagada:**
+   - Evento delete do Baileys → `is_deleted = true`, `original_body` preservado
 
-5. **NPS:**
-   - Ao finalizar um ticket, o sistema envia a pergunta de NPS
-   - Quando o cliente responde com 1-5, a Edge Function atualiza `nps_ratings.rating`
+5. **Mensagens agendadas:**
+   - Bridge faz poll em `scheduled_messages` e envia no horário
 
-### Edge Function (Webhook WhatsApp)
+6. **NPS:**
+   - Ao finalizar ticket, mensagem de NPS é enfileirada
+   - Resposta 1-5 do cliente atualiza `nps_ratings`
 
-Para ativar a integração em produção, deploy uma Edge Function no Supabase:
+### Deploy do Bridge
 
-```
-supabase/functions/whatsapp-webhook/index.ts
+**Docker:**
+```bash
+cd services/whatsapp-bridge
+docker build -t whatsapp-bridge .
+docker run -d --env-file .env --name whatsapp-bridge whatsapp-bridge
 ```
 
-Esta função:
-- Mantém a sessão Baileys ativa
-- Recebe mensagens do WhatsApp e insere no banco
-- Monitora a tabela `messages` para enviar mensagens dos agentes
-- Processa eventos de exclusão de mensagens
-- Executa o fluxo do bot de triagem
+**PM2 (VPS):**
+```bash
+cd services/whatsapp-bridge
+npm run build
+pm2 start dist/index.js --name whatsapp-bridge
+```
 
-### Configuração de Segredes
+### Troubleshooting
 
-Os seguintes segredos são necessários para a Edge Function (configurados automaticamente no painel do Supabase):
-- `SUPABASE_URL`
-- `SUPABASE_SERVICE_ROLE_KEY`
-- `WHATSAPP_SESSION_SECRET` (opcional, para criptografia da sessão Baileys)
+| Problema | Solução |
+|---|---|
+| QR não aparece | Verifique se o bridge está rodando (`npm run whatsapp:bridge:dev`) |
+| Upload de mídia falha | Execute `supabase db push` para criar bucket `chat-media` |
+| Mensagens não atualizam ao vivo | Migration de Realtime aplicada? |
+| Admin não cria usuários | Deploy das Edge Functions `admin-create-user` |
+| Bridge offline na UI | Alerta aparece após 15s em status `syncing` sem QR |
+
+### Variáveis do Bridge
+
+- `SUPABASE_URL` — URL do projeto
+- `SUPABASE_SERVICE_ROLE_KEY` — chave service role (nunca no frontend)
+- `WHATSAPP_SESSION_SECRET` — opcional, criptografia da sessão
+- `BRIDGE_POLL_INTERVAL_MS` — intervalo de poll (default 5000ms)
 
 ---
 

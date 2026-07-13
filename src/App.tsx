@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { AuthScreen } from './components/AuthScreen';
 import { Sidebar, type TabId } from './components/layout/Sidebar';
@@ -11,6 +11,7 @@ import { AutoMessagesView } from './components/views/AutoMessagesView';
 import { TagsView } from './components/views/TagsView';
 import { CannedView } from './components/views/CannedView';
 import { useNotifications } from './hooks/useNotifications';
+import { useTickets } from './hooks/useData';
 import { Loader2, Bell } from 'lucide-react';
 
 function AppContent() {
@@ -18,6 +19,17 @@ function AppContent() {
   const [activeTab, setActiveTab] = useState<TabId>('dashboard');
   const [preselectedTicket, setPreselectedTicket] = useState<string | null>(null);
   const { notifications, notify, soundEnabled, setSoundEnabled } = useNotifications();
+  const { tickets } = useTickets();
+
+  const unreadCount = useMemo(() => {
+    if (!profile) return 0;
+    const visible = profile.role === 'admin'
+      ? tickets
+      : tickets.filter((t) => t.department === profile.department || t.status === 'triage');
+    return visible
+      .filter((t) => t.status !== 'finished')
+      .reduce((sum, t) => sum + (t.unread_count || 0), 0);
+  }, [tickets, profile]);
 
   if (loading) {
     return (
@@ -31,7 +43,6 @@ function AppContent() {
     return <AuthScreen />;
   }
 
-  // Guard admin-only tabs
   const guardedTab = (tab: TabId): TabId => {
     if ((tab === 'users' || tab === 'auto-messages') && profile.role !== 'admin') {
       return 'dashboard';
@@ -59,7 +70,7 @@ function AppContent() {
       <Sidebar
         active={activeTab}
         onNavigate={handleNavigate}
-        unreadCount={0}
+        unreadCount={unreadCount}
         soundEnabled={soundEnabled}
         onToggleSound={() => setSoundEnabled(!soundEnabled)}
         notifications={notificationBell}
@@ -82,7 +93,6 @@ function AppContent() {
         {activeTab === 'canned' && <CannedView />}
       </main>
 
-      {/* Toast notifications */}
       <div className="fixed bottom-4 right-4 space-y-2 z-50">
         {notifications.map((n) => (
           <div key={n.id} className="card p-3 shadow-2xl animate-slide-in flex items-start gap-2 max-w-xs bg-ink-800">

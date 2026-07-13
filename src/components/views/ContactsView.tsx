@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { useContacts } from '../../hooks/useData';
+import { useContacts, useWhatsappConnection } from '../../hooks/useData';
 import { supabase } from '../../lib/supabase';
-import { Search, Plus, RefreshCw, MessageSquare, Phone, Loader2, UserPlus } from 'lucide-react';
+import { Search, Plus, RefreshCw, MessageSquare, Phone, Loader2, AlertCircle } from 'lucide-react';
 import type { Contact } from '../../types';
 
 interface ContactsViewProps {
@@ -10,11 +10,14 @@ interface ContactsViewProps {
 
 export function ContactsView({ onStartConversation }: ContactsViewProps) {
   const { contacts, loading, refetch } = useContacts();
+  const { connection } = useWhatsappConnection();
   const [search, setSearch] = useState('');
   const [showAdd, setShowAdd] = useState(false);
   const [newName, setNewName] = useState('');
   const [newPhone, setNewPhone] = useState('');
   const [syncing, setSyncing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
 
   const filtered = contacts.filter(
     (c) => c.name.toLowerCase().includes(search.toLowerCase()) || c.phone.includes(search)
@@ -22,8 +25,13 @@ export function ContactsView({ onStartConversation }: ContactsViewProps) {
 
   const handleAdd = async () => {
     if (!newName.trim() || !newPhone.trim()) return;
+    setError(null);
     const phone = newPhone.replace(/\D/g, '');
-    await supabase.from('contacts').insert({ name: newName.trim(), phone });
+    const { error: insertError } = await supabase.from('contacts').insert({ name: newName.trim(), phone });
+    if (insertError) {
+      setError(insertError.message);
+      return;
+    }
     setNewName('');
     setNewPhone('');
     setShowAdd(false);
@@ -32,28 +40,37 @@ export function ContactsView({ onStartConversation }: ContactsViewProps) {
 
   const handleSync = async () => {
     setSyncing(true);
-    // Simulate sync - in production this would pull from WhatsApp API
-    await new Promise((r) => setTimeout(r, 1500));
+    setSyncMessage(null);
+    setError(null);
+    await refetch();
     setSyncing(false);
-    refetch();
+    if (connection?.status === 'connected') {
+      setSyncMessage('Contatos sincronizados com o banco de dados. Novos contatos aparecem automaticamente via WhatsApp.');
+    } else {
+      setSyncMessage('WhatsApp desconectado. Conecte na aba Conexão WhatsApp para receber contatos automaticamente.');
+    }
   };
 
   const handleStartConversation = async (contact: Contact) => {
-    // Check if there's already an active ticket for this contact
-    const { data: existing } = await supabase
+    setError(null);
+    const { data: existing, error: findError } = await supabase
       .from('tickets')
       .select('id')
       .eq('contact_id', contact.id)
       .neq('status', 'finished')
       .maybeSingle();
 
+    if (findError) {
+      setError(findError.message);
+      return;
+    }
+
     if (existing) {
       onStartConversation(existing.id);
       return;
     }
 
-    // Create new ticket
-    const { data, error } = await supabase
+    const { data, error: createError } = await supabase
       .from('tickets')
       .insert({
         contact_id: contact.id,
@@ -63,7 +80,11 @@ export function ContactsView({ onStartConversation }: ContactsViewProps) {
       .select('id')
       .single();
 
-    if (!error && data) {
+    if (createError) {
+      setError(createError.message);
+      return;
+    }
+    if (data) {
       onStartConversation(data.id);
     }
   };
@@ -94,6 +115,19 @@ export function ContactsView({ onStartConversation }: ContactsViewProps) {
           </button>
         </div>
       </div>
+
+      {error && (
+        <div className="card p-3 flex items-start gap-2 text-sm text-danger-400 border-danger-500/30 bg-danger-500/10">
+          <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+          {error}
+        </div>
+      )}
+
+      {syncMessage && (
+        <div className="card p-3 text-sm text-ink-200 border-brand-500/30 bg-brand-500/10">
+          {syncMessage}
+        </div>
+      )}
 
       {showAdd && (
         <div className="card p-4 animate-fade-in">
@@ -129,52 +163,50 @@ export function ContactsView({ onStartConversation }: ContactsViewProps) {
       <div className="card overflow-hidden">
         <table className="w-full">
           <thead>
-            <tr className="border-b border-ink-700 bg-ink-800">
-              <th className="text-left text-xs font-medium text-ink-200 px-4 py-3">Contato</th>
-              <th className="text-left text-xs font-medium text-ink-200 px-4 py-3">Telefone</th>
-              <th className="text-left text-xs font-medium text-ink-200 px-4 py-3 hidden md:table-cell">Criado em</th>
-              <th className="text-right text-xs font-medium text-ink-200 px-4 py-3">Ações</th>
+            <tr className="border-b border-ink-700 text-xs text-ink-300">
+              <th className="text-left p-3 font-medium">Nome</th>
+              <th className="text-left p-3 font-medium">Telefone</th>
+              <th className="text-right p-3 font-medium">Ações</th>
             </tr>
           </thead>
           <tbody>
-            {filtered.map((c) => (
-              <tr key={c.id} className="border-b border-ink-700 hover:bg-ink-800 transition-colors">
-                <td className="px-4 py-3">
-                  <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-full bg-ink-700 flex items-center justify-center text-sm font-semibold text-ink-100">
-                      {c.name.charAt(0).toUpperCase()}
-                    </div>
-                    <span className="text-sm text-white">{c.name}</span>
-                  </div>
-                </td>
-                <td className="px-4 py-3">
-                  <div className="flex items-center gap-2 text-sm text-ink-200">
-                    <Phone className="w-3.5 h-3.5 text-ink-300" />
-                    {c.phone}
-                  </div>
-                </td>
-                <td className="px-4 py-3 text-sm text-ink-300 hidden md:table-cell">
-                  {new Date(c.created_at).toLocaleDateString('pt-BR')}
-                </td>
-                <td className="px-4 py-3 text-right">
-                  <button
-                    onClick={() => handleStartConversation(c)}
-                    className="btn-secondary text-xs px-3 py-1.5"
-                  >
-                    <MessageSquare className="w-3.5 h-3.5" />
-                    Nova Conversa
-                  </button>
+            {filtered.length === 0 ? (
+              <tr>
+                <td colSpan={3} className="p-8 text-center text-sm text-ink-300">
+                  Nenhum contato encontrado
                 </td>
               </tr>
-            ))}
+            ) : (
+              filtered.map((contact) => (
+                <tr key={contact.id} className="border-b border-ink-800 hover:bg-ink-800/50 transition-colors">
+                  <td className="p-3">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-lg bg-brand-600/30 flex items-center justify-center text-xs font-bold text-brand-300">
+                        {contact.name.charAt(0).toUpperCase()}
+                      </div>
+                      <span className="text-sm text-white">{contact.name}</span>
+                    </div>
+                  </td>
+                  <td className="p-3">
+                    <span className="text-sm text-ink-300 flex items-center gap-1">
+                      <Phone className="w-3 h-3" />
+                      {contact.phone}
+                    </span>
+                  </td>
+                  <td className="p-3 text-right">
+                    <button
+                      onClick={() => handleStartConversation(contact)}
+                      className="btn-secondary text-xs"
+                    >
+                      <MessageSquare className="w-3.5 h-3.5" />
+                      Conversar
+                    </button>
+                  </td>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
-        {filtered.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-12 text-ink-300">
-            <UserPlus className="w-10 h-10 mb-2 opacity-30" />
-            <p className="text-sm">Nenhum contato encontrado</p>
-          </div>
-        )}
       </div>
     </div>
   );

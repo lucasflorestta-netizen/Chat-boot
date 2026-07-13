@@ -199,6 +199,15 @@ export function useWhatsappConnection() {
   }, []);
 
   useEffect(() => { refetch(); }, [refetch]);
+
+  useEffect(() => {
+    const channel = supabase
+      .channel('whatsapp-connection-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'whatsapp_connection' }, () => refetch())
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [refetch]);
+
   return { connection, loading, refetch };
 }
 

@@ -1,5 +1,5 @@
 {
-  "name": "vite-react-typescript-starter",
+  "name": "helpdesk-whatsapp-crm",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -8,11 +8,16 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit -p tsconfig.app.json"
+    "typecheck": "tsc --noEmit -p tsconfig.app.json",
+    "whatsapp:bridge": "npm run start --prefix services/whatsapp-bridge",
+    "whatsapp:bridge:dev": "npm run dev --prefix services/whatsapp-bridge",
+    "whatsapp:bridge:build": "npm run build --prefix services/whatsapp-bridge",
+    "supabase:deploy-functions": "supabase functions deploy admin-create-user && supabase functions deploy admin-delete-user"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",
     "lucide-react": "^0.344.0",
+    "qrcode.react": "^4.2.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

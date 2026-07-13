@@ -118,8 +118,16 @@ export function UsersView() {
                 <button
                   onClick={async () => {
                     if (confirm(`Remover ${p.name}?`)) {
-                      await supabase.from('profiles').delete().eq('id', p.id);
-                      refetch();
+                      const { data, error: fnError } = await supabase.functions.invoke('admin-delete-user', {
+                        body: { userId: p.id },
+                      });
+                      if (fnError) {
+                        alert(fnError.message);
+                      } else if (data?.error) {
+                        alert(data.error);
+                      } else {
+                        refetch();
+                      }
                     }
                   }}
                   className="btn-ghost text-xs text-danger-400"
@@ -224,23 +232,14 @@ function CreateUserForm({ onClose, onCreated }: { onClose: () => void; onCreated
   const handleCreate = async () => {
     setLoading(true);
     setError(null);
-    const { data, error: signUpError } = await supabase.auth.admin.createUser({
-      email,
-      password,
-      user_metadata: { name, role, department },
+    const { data, error: fnError } = await supabase.functions.invoke('admin-create-user', {
+      body: { email, password, name, role, department },
     });
-    if (signUpError) {
-      const { error: err2 } = await supabase.auth.signUp({
-        email,
-        password,
-        options: { data: { name, role, department } },
-      });
-      if (err2) setError(err2.message);
-      else onCreated();
+    if (fnError) {
+      setError(fnError.message);
+    } else if (data?.error) {
+      setError(data.error);
     } else {
-      if (data.user) {
-        await supabase.from('profiles').update({ role, department }).eq('id', data.user.id);
-      }
       onCreated();
     }
     setLoading(false);

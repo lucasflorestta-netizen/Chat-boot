@@ -144,6 +144,7 @@ export function ChatView({ preselectedTicketId, onConsumePreselect, onNotify }: 
       sender_type: 'system',
       body: closingMsg,
       media_type: 'text',
+      whatsapp_delivered: false,
     });
 
     if (autoSettings?.nps_active) {
@@ -153,6 +154,7 @@ export function ChatView({ preselectedTicketId, onConsumePreselect, onNotify }: 
         sender_type: 'system',
         body: npsQuestion,
         media_type: 'text',
+        whatsapp_delivered: false,
       });
       await supabase.from('nps_ratings').insert({
         ticket_id: ticket.id,
@@ -425,6 +427,7 @@ function ChatDetail({
       if (match) {
         await supabase.from('messages').insert({
           ticket_id: ticket.id, sender_type: 'agent', sender_id: profile.id, body: match.body, media_type: 'text',
+          whatsapp_delivered: false,
         });
         await supabase.from('tickets').update({ last_message_at: new Date().toISOString() }).eq('id', ticket.id);
         return;
@@ -433,26 +436,37 @@ function ChatDetail({
 
     await supabase.from('messages').insert({
       ticket_id: ticket.id, sender_type: 'agent', sender_id: profile.id, body, media_type: 'text',
+      whatsapp_delivered: false,
     });
     await supabase.from('tickets').update({ last_message_at: new Date().toISOString() }).eq('id', ticket.id);
   };
 
+  const [uploadError, setUploadError] = useState<string | null>(null);
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !profile) return;
+    setUploadError(null);
     let mediaType: 'image' | 'audio' | 'file' | 'video' = 'file';
     if (file.type.startsWith('image/')) mediaType = 'image';
     else if (file.type.startsWith('audio/')) mediaType = 'audio';
     else if (file.type.startsWith('video/')) mediaType = 'video';
 
     const fileName = `${ticket.id}/${Date.now()}-${file.name}`;
-    const { data: uploadData } = await supabase.storage.from('chat-media').upload(fileName, file);
-    const publicUrl = uploadData ? supabase.storage.from('chat-media').getPublicUrl(fileName).data.publicUrl : null;
+    const { data: uploadData, error: uploadErr } = await supabase.storage.from('chat-media').upload(fileName, file);
+    if (uploadErr || !uploadData) {
+      setUploadError(uploadErr?.message || 'Falha ao enviar arquivo');
+      return;
+    }
+    const publicUrl = supabase.storage.from('chat-media').getPublicUrl(fileName).data.publicUrl;
 
     await supabase.from('messages').insert({
       ticket_id: ticket.id, sender_type: 'agent', sender_id: profile.id,
       body: null, media_type: mediaType, media_url: publicUrl, media_name: file.name,
+      whatsapp_delivered: false,
     });
+    await supabase.from('tickets').update({ last_message_at: new Date().toISOString() }).eq('id', ticket.id);
+    e.target.value = '';
   };
 
   const handleAddNote = async (text: string) => {
@@ -709,6 +723,10 @@ function ChatDetail({
               </div>
             )}
             {showEmoji && <EmojiPicker onSelect={(e) => setInput((prev) => prev + e)} onClose={() => setShowEmoji(false)} />}
+
+            {uploadError && (
+              <p className="text-xs text-danger-400 mb-1">{uploadError}</p>
+            )}
 
             <div className="flex items-end gap-1.5">
               <div className="flex gap-0.5">
