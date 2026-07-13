@@ -1,14 +1,15 @@
 import { supabase, logger, POLL_INTERVAL_MS } from './supabase.js';
-import { getSocket, jidFromPhone } from './utils.js';
+import { currentSocket, jidFromPhone } from './utils.js';
 
 let processing = false;
 
 export async function processScheduledMessages() {
   if (processing) return;
+  if (!currentSocket) return;
   processing = true;
 
   try {
-    const sock = getSocket();
+    const sock = currentSocket;
     const now = new Date().toISOString();
 
     const { data: due, error } = await supabase

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { useWhatsappConnection } from '../../hooks/useData';
 import { supabase } from '../../lib/supabase';
@@ -9,52 +9,86 @@ export function WhatsappView() {
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [bridgeWarning, setBridgeWarning] = useState(false);
+  const generateLock = useRef(false);
+
+  // Poll while waiting for the bridge to publish a QR (Realtime alone can miss updates)
+  useEffect(() => {
+    if (connection?.status !== 'syncing' || connection?.qr_code) return;
+    const interval = setInterval(() => {
+      void refetch();
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [connection?.status, connection?.qr_code, refetch]);
 
   useEffect(() => {
     if (connection?.status !== 'syncing') {
       setBridgeWarning(false);
       return;
     }
+    if (connection?.qr_code) {
+      setBridgeWarning(false);
+      return;
+    }
     const timer = setTimeout(() => {
-      if (connection?.status === 'syncing' && !connection?.qr_code) {
-        setBridgeWarning(true);
-      }
-    }, 15000);
+      setBridgeWarning(true);
+    }, 20000);
     return () => clearTimeout(timer);
   }, [connection?.status, connection?.qr_code]);
 
   const handleGenerateQR = async () => {
+    if (generateLock.current) return;
+    generateLock.current = true;
     setGenerating(true);
     setError(null);
     setBridgeWarning(false);
 
-    const { data: row } = await supabase.from('whatsapp_connection').select('id').maybeSingle();
-    if (!row?.id) {
-      setError('Registro de conexão não encontrado. Execute as migrations do Supabase.');
+    try {
+      const { data: row, error: selectError } = await supabase
+        .from('whatsapp_connection')
+        .select('id')
+        .maybeSingle();
+
+      if (selectError) {
+        setError(selectError.message);
+        return;
+      }
+      if (!row?.id) {
+        setError('Registro de conexão não encontrado. Execute as migrations do Supabase.');
+        return;
+      }
+
+      // Clear qr_code so the bridge restarts pairing and publishes a fresh QR.
+      const { error: updateError } = await supabase
+        .from('whatsapp_connection')
+        .update({
+          qr_code: null,
+          status: 'syncing',
+        })
+        .eq('id', row.id);
+
+      if (updateError) {
+        setError(updateError.message);
+        return;
+      }
+
+      await refetch();
+    } finally {
       setGenerating(false);
-      return;
+      generateLock.current = false;
     }
-
-    const { error: updateError } = await supabase.from('whatsapp_connection').update({
-      qr_code: null,
-      status: 'syncing',
-    }).eq('id', row.id);
-
-    if (updateError) {
-      setError(updateError.message);
-    }
-    setGenerating(false);
-    refetch();
   };
 
   const handleDisconnect = async () => {
     if (!connection?.id) return;
     setError(null);
-    const { error: updateError } = await supabase.from('whatsapp_connection').update({
-      status: 'disconnected',
-      qr_code: null,
-      phone_number: null,
-    }).eq('id', connection.id);
+    const { error: updateError } = await supabase
+      .from('whatsapp_connection')
+      .update({
+        status: 'disconnected',
+        qr_code: null,
+        phone_number: null,
+      })
+      .eq('id', connection.id);
     if (updateError) setError(updateError.message);
     refetch();
   };
@@ -121,16 +155,23 @@ export function WhatsappView() {
               </p>
             )}
           </div>
-          {status === 'connected' ? (
-            <button onClick={handleDisconnect} className="btn-danger text-sm">
-              Desconectar
-            </button>
-          ) : (
-            <button onClick={handleGenerateQR} disabled={generating || status === 'syncing'} className="btn-primary text-sm">
-              {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-              Gerar QR Code
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            {status === 'syncing' && (
+              <button onClick={handleDisconnect} className="btn-danger text-sm" disabled={generating}>
+                Cancelar
+              </button>
+            )}
+            {status === 'connected' ? (
+              <button onClick={handleDisconnect} className="btn-danger text-sm">
+                Desconectar
+              </button>
+            ) : (
+              <button onClick={handleGenerateQR} disabled={generating} className="btn-primary text-sm">
+                {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                {status === 'syncing' ? 'Atualizar QR' : 'Gerar QR Code'}
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -138,7 +179,7 @@ export function WhatsappView() {
         <div className="card p-8 flex flex-col items-center">
           <div className="w-64 h-64 bg-white rounded-2xl flex items-center justify-center mb-4 p-4">
             {status === 'syncing' && connection?.qr_code ? (
-              <QRCodeSVG value={connection.qr_code} size={224} level="M" />
+              <QRCodeSVG value={connection.qr_code} size={224} level="M" includeMargin={false} />
             ) : status === 'syncing' ? (
               <div className="flex flex-col items-center text-ink-400">
                 <Loader2 className="w-10 h-10 animate-spin mb-2" />

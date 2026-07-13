@@ -30,17 +30,28 @@ export async function getContactByPhone(phone: string) {
   return data;
 }
 
-export async function upsertContact(phone: string, name: string) {
+export async function upsertContact(
+  phone: string,
+  name: string,
+  opts?: { preferName?: boolean },
+) {
+  const resolvedName = (name || '').trim() || 'Unknown';
   const existing = await getContactByPhone(phone);
   if (existing) {
-    if (name && name !== 'Unknown' && existing.name === 'Unknown') {
-      await supabase.from('contacts').update({ name }).eq('id', existing.id);
+    const shouldUpdate =
+      resolvedName !== 'Unknown' &&
+      (existing.name === 'Unknown' ||
+        (opts?.preferName === true && resolvedName !== existing.name));
+
+    if (shouldUpdate) {
+      await supabase.from('contacts').update({ name: resolvedName }).eq('id', existing.id);
+      return { ...existing, name: resolvedName };
     }
     return existing;
   }
   const { data, error } = await supabase
     .from('contacts')
-    .insert({ phone, name: name || 'Unknown' })
+    .insert({ phone, name: resolvedName })
     .select('*')
     .single();
   if (error) throw error;

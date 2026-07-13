@@ -109,6 +109,15 @@ export function useContacts() {
   }, []);
 
   useEffect(() => { refetch(); }, [refetch]);
+
+  useEffect(() => {
+    const channel = supabase
+      .channel('contacts-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'contacts' }, () => refetch())
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [refetch]);
+
   return { contacts, loading, refetch };
 }
 

@@ -117,6 +117,7 @@ export interface WhatsappConnection {
   qr_code: string | null;
   phone_number: string | null;
   last_connected_at: string | null;
+  contacts_sync_requested_at: string | null;
   updated_at: string;
 }
 

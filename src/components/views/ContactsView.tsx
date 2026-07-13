@@ -42,13 +42,42 @@ export function ContactsView({ onStartConversation }: ContactsViewProps) {
     setSyncing(true);
     setSyncMessage(null);
     setError(null);
-    await refetch();
-    setSyncing(false);
-    if (connection?.status === 'connected') {
-      setSyncMessage('Contatos sincronizados com o banco de dados. Novos contatos aparecem automaticamente via WhatsApp.');
-    } else {
-      setSyncMessage('WhatsApp desconectado. Conecte na aba Conexão WhatsApp para receber contatos automaticamente.');
+
+    if (connection?.status !== 'connected') {
+      setSyncing(false);
+      setError('WhatsApp desconectado. Conecte na aba Conexão WhatsApp para sincronizar a agenda.');
+      return;
     }
+
+    const requestedAt = new Date().toISOString();
+    const baselineCount = contacts.length;
+    const { error: syncError } = await supabase
+      .from('whatsapp_connection')
+      .update({ contacts_sync_requested_at: requestedAt })
+      .eq('id', connection.id);
+
+    if (syncError) {
+      setSyncing(false);
+      setError(syncError.message);
+      return;
+    }
+
+    // History + app-state sync can take a while after the bridge soft-restarts
+    let count: number | null = baselineCount;
+    for (let i = 0; i < 30; i++) {
+      await new Promise((r) => setTimeout(r, 2000));
+      await refetch();
+      const { count: current } = await supabase
+        .from('contacts')
+        .select('*', { count: 'exact', head: true });
+      count = current ?? 0;
+      if (count > baselineCount) break;
+    }
+
+    setSyncing(false);
+    setSyncMessage(
+      `Agenda sincronizada. ${count ?? 0} contatos na base. Contatos do WhatsApp também entram automaticamente ao conectar.`,
+    );
   };
 
   const handleStartConversation = async (contact: Contact) => {
@@ -173,7 +202,7 @@ export function ContactsView({ onStartConversation }: ContactsViewProps) {
             {filtered.length === 0 ? (
               <tr>
                 <td colSpan={3} className="p-8 text-center text-sm text-ink-300">
-                  Nenhum contato encontrado
+                  Nenhum contato encontrado. Conecte o WhatsApp e clique em Sincronizar para importar a agenda.
                 </td>
               </tr>
             ) : (

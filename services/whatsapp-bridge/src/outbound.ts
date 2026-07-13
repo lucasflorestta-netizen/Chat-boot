@@ -1,14 +1,15 @@
 import { supabase, logger, POLL_INTERVAL_MS } from './supabase.js';
-import { getSocket, jidFromPhone } from './utils.js';
+import { currentSocket, jidFromPhone } from './utils.js';
 
 let processing = false;
 
 export async function processOutboundMessages() {
   if (processing) return;
+  if (!currentSocket) return;
   processing = true;
 
   try {
-    const sock = getSocket();
+    const sock = currentSocket;
     const { data: pending, error } = await supabase
       .from('messages')
       .select('id, ticket_id, body, media_type, media_url, media_name, sender_type, tickets(contacts(phone))')
