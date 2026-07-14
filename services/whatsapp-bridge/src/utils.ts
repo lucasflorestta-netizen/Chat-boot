@@ -198,6 +198,32 @@ export async function getActiveTicket(contactId: string) {
   return data;
 }
 
+/** Finished ticket with unanswered NPS within the last 24h. */
+export async function getPendingNpsTicket(contactId: string) {
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+  const { data: pending } = await supabase
+    .from('nps_ratings')
+    .select('ticket_id')
+    .eq('contact_id', contactId)
+    .is('rating', null)
+    .gte('created_at', since)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!pending?.ticket_id) return null;
+
+  const { data: ticket } = await supabase
+    .from('tickets')
+    .select('*')
+    .eq('id', pending.ticket_id)
+    .eq('status', 'finished')
+    .maybeSingle();
+
+  return ticket;
+}
+
 export async function createTicket(contactId: string, department = 'support') {
   const { data, error } = await supabase
     .from('tickets')

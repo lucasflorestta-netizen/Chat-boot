@@ -81,6 +81,60 @@ async function abandonMessage(messageId: string, reason: string) {
   await supabase.from('messages').update({ whatsapp_delivered: true }).eq('id', messageId);
 }
 
+type QuotedRow = {
+  whatsapp_message_id: string | null;
+  sender_type: string;
+  body: string | null;
+  media_type: string | null;
+};
+
+/** Build Baileys `quoted` option from a previously stored message. */
+async function buildQuotedOption(
+  replyToMessageId: string | null | undefined,
+  remoteJid: string,
+): Promise<{ key: { remoteJid: string; id: string; fromMe: boolean }; message: { conversation: string } } | undefined> {
+  if (!replyToMessageId) return undefined;
+
+  const { data, error } = await supabase
+    .from('messages')
+    .select('whatsapp_message_id, sender_type, body, media_type')
+    .eq('id', replyToMessageId)
+    .maybeSingle();
+
+  if (error || !data) {
+    if (error) logger.warn({ error, replyToMessageId }, 'Failed to load quoted message');
+    return undefined;
+  }
+
+  const quoted = data as QuotedRow;
+  if (!quoted.whatsapp_message_id) return undefined;
+
+  const preview =
+    quoted.body?.trim() ||
+    (quoted.media_type === 'image'
+      ? 'Foto'
+      : quoted.media_type === 'audio'
+        ? 'Áudio'
+        : quoted.media_type === 'video'
+          ? 'Vídeo'
+          : quoted.media_type === 'file'
+            ? 'Documento'
+            : quoted.media_type === 'sticker'
+              ? 'Figurinha'
+              : 'Mensagem');
+
+  return {
+    key: {
+      remoteJid,
+      id: quoted.whatsapp_message_id,
+      fromMe: quoted.sender_type !== 'client',
+    },
+    message: {
+      conversation: preview,
+    },
+  };
+}
+
 export async function processOutboundMessages() {
   if (processing) return;
   if (!currentSocket) return;
@@ -90,7 +144,7 @@ export async function processOutboundMessages() {
     const sock = currentSocket;
     const { data: pending, error } = await supabase
       .from('messages')
-      .select('id, ticket_id, body, media_type, media_url, media_name, sender_type, tickets(contacts(phone, whatsapp_lid))')
+      .select('id, ticket_id, body, media_type, media_url, media_name, sender_type, reply_to_message_id, tickets(contacts(phone, whatsapp_lid))')
       .eq('whatsapp_delivered', false)
       .in('sender_type', ['agent', 'bot', 'system'])
       .neq('media_type', 'note')
@@ -128,9 +182,15 @@ export async function processOutboundMessages() {
       }
 
       try {
+        const quoted = await buildQuotedOption(
+          (msg as { reply_to_message_id?: string | null }).reply_to_message_id,
+          jid,
+        );
+        const sendOpts = quoted ? { quoted } : undefined;
+
         if (msg.media_type === 'text' || !msg.media_url) {
           if (msg.body) {
-            const result = await sock.sendMessage(jid, { text: msg.body });
+            const result = await sock.sendMessage(jid, { text: msg.body }, sendOpts);
             const waId = result?.key?.id;
             await markDelivered(msg.id, waId || undefined);
           } else {
@@ -153,21 +213,21 @@ export async function processOutboundMessages() {
               image: buffer,
               caption: msg.body || undefined,
               mimetype,
-            });
+            }, sendOpts);
             await markDelivered(msg.id, result?.key?.id || undefined);
           } else if (msg.media_type === 'audio') {
             const result = await sock.sendMessage(jid, {
               audio: buffer,
               mimetype,
               ptt: mimetype.includes('ogg') || mimetype.includes('opus'),
-            });
+            }, sendOpts);
             await markDelivered(msg.id, result?.key?.id || undefined);
           } else if (msg.media_type === 'video') {
             const result = await sock.sendMessage(jid, {
               video: buffer,
               caption: msg.body || undefined,
               mimetype,
-            });
+            }, sendOpts);
             await markDelivered(msg.id, result?.key?.id || undefined);
           } else {
             const result = await sock.sendMessage(jid, {
@@ -175,7 +235,7 @@ export async function processOutboundMessages() {
               mimetype,
               fileName: msg.media_name || 'file',
               caption: msg.body || undefined,
-            });
+            }, sendOpts);
             await markDelivered(msg.id, result?.key?.id || undefined);
           }
         }

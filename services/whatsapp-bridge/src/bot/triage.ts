@@ -1,6 +1,9 @@
 import { supabase, logger } from '../supabase.js';
 import { getSocket, resolveOutboundJid } from '../utils.js';
 
+const QUEUE_ACK =
+  'Recebemos sua solicitação. Em breve um agente dará continuidade ao atendimento.';
+
 async function insertOutboundMessage(ticketId: string, body: string, senderType: 'bot' | 'system' = 'bot') {
   await supabase.from('messages').insert({
     ticket_id: ticketId,
@@ -44,10 +47,8 @@ export async function handleTriageMessage(ticketId: string, phone: string, body:
 
   await supabase.from('tickets').update({ department }).eq('id', ticketId);
 
-  const { data: settingsFull } = await supabase.from('auto_message_settings').select('takeover_message').maybeSingle();
-  const takeover = settingsFull?.takeover_message || 'Um agente irá atendê-lo em breve.';
-  await sendWhatsAppText(phone, takeover, lid);
-  await insertOutboundMessage(ticketId, takeover, 'system');
+  await sendWhatsAppText(phone, QUEUE_ACK, lid);
+  await insertOutboundMessage(ticketId, QUEUE_ACK, 'system');
 
   logger.info({ ticketId, department }, 'Ticket triaged via bot');
 }

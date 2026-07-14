@@ -50,6 +50,22 @@ export function useTickets(filter?: { status?: string; department?: string; assi
 // ============================================================
 // MESSAGES
 // ============================================================
+const MESSAGE_SELECT =
+  '*, sender:profiles!messages_sender_id_fkey(*), reply_to:messages!reply_to_message_id(*)';
+
+async function fetchEnrichedMessage(id: string): Promise<Message | null> {
+  const { data, error } = await supabase
+    .from('messages')
+    .select(MESSAGE_SELECT)
+    .eq('id', id)
+    .maybeSingle();
+  if (error) {
+    console.error('Error enriching message:', error);
+    return null;
+  }
+  return data as Message | null;
+}
+
 export function useMessages(ticketId: string | null) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
@@ -57,9 +73,10 @@ export function useMessages(ticketId: string | null) {
   useEffect(() => {
     if (!ticketId) return;
     setLoading(true);
+    setMessages([]);
     supabase
       .from('messages')
-      .select('*, sender:profiles!messages_sender_id_fkey(*)')
+      .select(MESSAGE_SELECT)
       .eq('ticket_id', ticketId)
       .order('created_at', { ascending: true })
       .then(({ data, error }) => {
@@ -77,21 +94,82 @@ export function useMessages(ticketId: string | null) {
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'messages', filter: `ticket_id=eq.${ticketId}` },
         (payload) => {
-          setMessages((prev) => [...prev, payload.new as Message]);
-        }
+          const row = payload.new as Message;
+          setMessages((prev) => {
+            if (prev.some((m) => m.id === row.id)) {
+              return prev.map((m) => (m.id === row.id ? { ...m, ...row, _localStatus: undefined } : m));
+            }
+            // Drop matching optimistic temp rows (same body/media from this agent send)
+            const withoutTemp = prev.filter(
+              (m) => !(m.id.startsWith('temp-') && m.ticket_id === row.ticket_id && m.sender_id === row.sender_id
+                && m.body === row.body && m.media_type === row.media_type && m.media_url === row.media_url),
+            );
+            return [...withoutTemp, row];
+          });
+          void fetchEnrichedMessage(row.id).then((enriched) => {
+            if (!enriched) return;
+            setMessages((prev) =>
+              prev.map((m) => (m.id === enriched.id ? { ...enriched, _localStatus: undefined } : m)),
+            );
+          });
+        },
       )
       .on(
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'messages', filter: `ticket_id=eq.${ticketId}` },
         (payload) => {
-          setMessages((prev) => prev.map((m) => (m.id === payload.new.id ? payload.new as Message : m)));
-        }
+          const row = payload.new as Message;
+          setMessages((prev) =>
+            prev.map((m) => {
+              if (m.id !== row.id) return m;
+              return {
+                ...m,
+                ...row,
+                sender: m.sender,
+                reply_to: m.reply_to,
+                _localStatus: undefined,
+              };
+            }),
+          );
+          void fetchEnrichedMessage(row.id).then((enriched) => {
+            if (!enriched) return;
+            setMessages((prev) => prev.map((m) => (m.id === enriched.id ? enriched : m)));
+          });
+        },
       )
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [ticketId]);
 
-  return { messages, loading };
+  const appendOptimistic = useCallback((message: Message) => {
+    setMessages((prev) => [...prev, message]);
+  }, []);
+
+  const replaceOptimistic = useCallback((tempId: string, message: Message) => {
+    setMessages((prev) => {
+      const withoutDup = prev.filter((m) => m.id !== message.id);
+      return withoutDup.map((m) => (m.id === tempId ? { ...message, _localStatus: undefined } : m));
+    });
+  }, []);
+
+  const failOptimistic = useCallback((tempId: string) => {
+    setMessages((prev) =>
+      prev.map((m) => (m.id === tempId ? { ...m, _localStatus: 'failed' as const } : m)),
+    );
+  }, []);
+
+  const removeOptimistic = useCallback((tempId: string) => {
+    setMessages((prev) => prev.filter((m) => m.id !== tempId));
+  }, []);
+
+  return {
+    messages,
+    loading,
+    appendOptimistic,
+    replaceOptimistic,
+    failOptimistic,
+    removeOptimistic,
+  };
 }
 
 // ============================================================

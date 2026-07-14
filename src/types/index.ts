@@ -50,6 +50,9 @@ export interface Ticket {
   tags?: Tag[];
 }
 
+/** Client-only send state for optimistic UI (not stored in DB). */
+export type LocalSendStatus = 'sending' | 'failed';
+
 export interface Message {
   id: string;
   ticket_id: string;
@@ -63,8 +66,13 @@ export interface Message {
   original_body: string | null;
   whatsapp_delivered: boolean;
   whatsapp_message_id: string | null;
+  reply_to_message_id: string | null;
   created_at: string;
   sender?: Profile | null;
+  /** Quoted message preview (joined via reply_to_message_id). */
+  reply_to?: Message | null;
+  /** Optimistic / failed local status — never comes from Supabase. */
+  _localStatus?: LocalSendStatus;
 }
 
 export interface Tag {

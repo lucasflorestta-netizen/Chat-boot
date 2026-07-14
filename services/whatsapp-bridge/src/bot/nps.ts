@@ -15,6 +15,15 @@ export async function handleNpsResponse(ticketId: string, contactId: string, bod
   if (!nps) return false;
 
   await supabase.from('nps_ratings').update({ rating }).eq('id', nps.id);
+
+  await supabase.from('messages').insert({
+    ticket_id: ticketId,
+    sender_type: 'system',
+    body: `Obrigado pela sua avaliação (${rating}/5)!`,
+    media_type: 'text',
+    whatsapp_delivered: false,
+  });
+
   logger.info({ ticketId, rating }, 'NPS rating recorded');
   return true;
 }

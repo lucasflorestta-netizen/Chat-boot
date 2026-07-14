@@ -2,6 +2,7 @@ import { downloadMediaMessage, type WAMessage } from '@whiskeysockets/baileys';
 import { supabase, logger } from './supabase.js';
 import {
   getActiveTicket,
+  getPendingNpsTicket,
   createTicket,
   upsertContact,
   resolveInboundPeer,
@@ -79,6 +80,48 @@ function extractMimeType(msg: WAMessage): string | null {
 
 function extractMediaName(msg: WAMessage): string | null {
   return msg.message?.documentMessage?.fileName || null;
+}
+
+/** Baileys contextInfo attached to text or media payloads. */
+function extractContextInfo(msg: WAMessage): {
+  stanzaId?: string | null;
+  participant?: string | null;
+  remoteJid?: string | null;
+} | null {
+  const message = msg.message;
+  if (!message) return null;
+  const ctx =
+    message.extendedTextMessage?.contextInfo ||
+    message.imageMessage?.contextInfo ||
+    message.videoMessage?.contextInfo ||
+    message.audioMessage?.contextInfo ||
+    message.documentMessage?.contextInfo ||
+    message.stickerMessage?.contextInfo ||
+    null;
+  if (!ctx?.stanzaId) return null;
+  return {
+    stanzaId: ctx.stanzaId,
+    participant: ctx.participant,
+    remoteJid: ctx.remoteJid,
+  };
+}
+
+async function resolveReplyToMessageId(
+  ticketId: string,
+  stanzaId: string | null | undefined,
+): Promise<string | null> {
+  if (!stanzaId) return null;
+  const { data, error } = await supabase
+    .from('messages')
+    .select('id')
+    .eq('ticket_id', ticketId)
+    .eq('whatsapp_message_id', stanzaId)
+    .maybeSingle();
+  if (error) {
+    logger.warn({ error, stanzaId, ticketId }, 'Failed to resolve quoted message');
+    return null;
+  }
+  return data?.id ?? null;
 }
 
 function extensionFor(mediaType: MediaKind, mime: string | null, fileName: string | null): string {
@@ -200,16 +243,21 @@ export async function handleInboundMessage(msg: WAMessage) {
   enqueueProfilePictureFetch(phone);
 
   let ticket = await getActiveTicket(contact.id);
+  let ticketJustCreated = false;
 
   if (!ticket) {
-    ticket = await createTicket(contact.id);
-    await sendBotGreetingIfNeeded(ticket.id, phone, lid);
-  }
+    // Prefer recording NPS on a recently finished ticket before opening a new one
+    if (body) {
+      const pendingNpsTicket = await getPendingNpsTicket(contact.id);
+      if (pendingNpsTicket) {
+        const handled = await handleNpsResponse(pendingNpsTicket.id, contact.id, body.trim());
+        if (handled) return;
+      }
+    }
 
-  // NPS response on finished tickets
-  if (ticket.status === 'finished' && body) {
-    const handled = await handleNpsResponse(ticket.id, contact.id, body.trim());
-    if (handled) return;
+    ticket = await createTicket(contact.id);
+    ticketJustCreated = true;
+    await sendBotGreetingIfNeeded(ticket.id, phone, lid);
   }
 
   if (ticket.status === 'finished') return;
@@ -222,6 +270,9 @@ export async function handleInboundMessage(msg: WAMessage) {
     return;
   }
 
+  const contextInfo = extractContextInfo(msg);
+  const replyToMessageId = await resolveReplyToMessageId(ticket.id, contextInfo?.stanzaId);
+
   const { error } = await supabase.from('messages').insert({
     ticket_id: ticket.id,
     sender_type: 'client',
@@ -231,6 +282,7 @@ export async function handleInboundMessage(msg: WAMessage) {
     media_name: mediaName,
     whatsapp_message_id: whatsappMessageId,
     whatsapp_delivered: true,
+    reply_to_message_id: replyToMessageId,
   });
 
   if (error) {
@@ -244,7 +296,8 @@ export async function handleInboundMessage(msg: WAMessage) {
     last_message_at: new Date().toISOString(),
   }).eq('id', ticket.id);
 
-  if (body && ticket.status === 'triage') {
+  // Skip triage on the opening message (avoids treating "1"/"2" first contact as department pick)
+  if (body && ticket.status === 'triage' && !ticketJustCreated) {
     await handleTriageMessage(ticket.id, phone, body.trim(), lid);
   }
 }

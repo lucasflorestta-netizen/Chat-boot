@@ -1,34 +1,101 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAutoMessageSettings } from '../../hooks/useData';
 import { supabase } from '../../lib/supabase';
-import { Save, Loader2, MessageSquare, Bot, UserCheck, CheckCircle, Star, Power } from 'lucide-react';
+import type { AutoMessageSettings } from '../../types';
+import { Save, Loader2, MessageSquare, Bot, UserCheck, CheckCircle, Star, Power, Check, AlertCircle } from 'lucide-react';
+
+const DEFAULT_SETTINGS: Omit<AutoMessageSettings, 'id' | 'updated_at'> = {
+  greeting_message: 'Olá! Bem-vindo ao nosso atendimento. Como podemos ajudar?',
+  bot_menu_active: true,
+  bot_menu_message: 'Digite o número do setor desejado:\n1 - Suporte\n2 - Vendas',
+  takeover_message: 'Olá! Sou {{agente}} e vou continuar seu atendimento. Em que posso ajudar?',
+  closing_message: 'Seu atendimento foi finalizado. Obrigado pelo contato!',
+  nps_question: 'Como você avalia nosso atendimento hoje? Digite de 1 a 5.',
+  nps_active: true,
+};
 
 export function AutoMessagesView() {
   const { settings, loading, refetch } = useAutoMessageSettings();
-  const [form, setForm] = useState(settings);
+  const [form, setForm] = useState<AutoMessageSettings | null>(settings);
   const [saving, setSaving] = useState(false);
+  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [ensuring, setEnsuring] = useState(false);
+  const seedAttempted = useRef(false);
 
   useEffect(() => {
     setForm(settings);
   }, [settings]);
 
+  // Seed singleton row if missing so the form never spins forever
+  useEffect(() => {
+    if (loading || settings || seedAttempted.current) return;
+    seedAttempted.current = true;
+    let cancelled = false;
+    (async () => {
+      setEnsuring(true);
+      const { data, error } = await supabase
+        .from('auto_message_settings')
+        .insert(DEFAULT_SETTINGS)
+        .select('*')
+        .single();
+      if (!cancelled) {
+        if (error) console.error('Error seeding auto_message_settings:', error);
+        else if (data) setForm(data as AutoMessageSettings);
+        await refetch();
+        setEnsuring(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [loading, settings, refetch]);
+
+  useEffect(() => {
+    if (!feedback) return;
+    const t = setTimeout(() => setFeedback(null), 4000);
+    return () => clearTimeout(t);
+  }, [feedback]);
+
   const handleSave = async () => {
     if (!form) return;
     setSaving(true);
-    await supabase.from('auto_message_settings').update({
-      greeting_message: form.greeting_message,
-      bot_menu_active: form.bot_menu_active,
-      bot_menu_message: form.bot_menu_message,
-      takeover_message: form.takeover_message,
-      closing_message: form.closing_message,
-      nps_question: form.nps_question,
-      nps_active: form.nps_active,
-    }).eq('id', form.id);
-    setSaving(false);
-    refetch();
+    setFeedback(null);
+    try {
+      const payload = {
+        greeting_message: form.greeting_message,
+        bot_menu_active: form.bot_menu_active,
+        bot_menu_message: form.bot_menu_message,
+        takeover_message: form.takeover_message,
+        closing_message: form.closing_message,
+        nps_question: form.nps_question,
+        nps_active: form.nps_active,
+      };
+
+      if (form.id) {
+        const { error } = await supabase
+          .from('auto_message_settings')
+          .update(payload)
+          .eq('id', form.id);
+        if (error) throw error;
+      } else {
+        const { data, error } = await supabase
+          .from('auto_message_settings')
+          .insert(payload)
+          .select('*')
+          .single();
+        if (error) throw error;
+        if (data) setForm(data as AutoMessageSettings);
+      }
+
+      setFeedback({ type: 'success', message: 'Configurações salvas com sucesso.' });
+      await refetch();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Falha ao salvar configurações.';
+      setFeedback({ type: 'error', message });
+    } finally {
+      setSaving(false);
+    }
   };
 
-  if (loading || !form) {
+  if (loading || ensuring || !form) {
     return (
       <div className="flex items-center justify-center h-96">
         <Loader2 className="w-8 h-8 animate-spin text-brand-500" />
@@ -48,6 +115,23 @@ export function AutoMessagesView() {
           Salvar Configurações
         </button>
       </div>
+
+      {feedback && (
+        <div
+          className={`flex items-center gap-2 rounded-lg px-4 py-3 text-sm ${
+            feedback.type === 'success'
+              ? 'bg-success-500/15 text-success-400'
+              : 'bg-red-500/15 text-red-400'
+          }`}
+        >
+          {feedback.type === 'success' ? (
+            <Check className="w-4 h-4 flex-shrink-0" />
+          ) : (
+            <AlertCircle className="w-4 h-4 flex-shrink-0" />
+          )}
+          {feedback.message}
+        </div>
+      )}
 
       {/* Bot menu toggle */}
       <div className="card p-5">
@@ -95,9 +179,10 @@ export function AutoMessagesView() {
           onChange={(e) => setForm({ ...form, bot_menu_message: e.target.value })}
           rows={4}
           className="input resize-none"
+          disabled={!form.bot_menu_active}
         />
         <p className="text-xs text-ink-300 mt-2">
-          Use o formato: "Digite 1 para Suporte ou 2 para Vendas". O sistema reconhece os números automaticamente.
+          Use o formato: &quot;Digite 1 para Suporte ou 2 para Vendas&quot;. O sistema reconhece os números automaticamente.
         </p>
       </SettingCard>
 
@@ -105,7 +190,7 @@ export function AutoMessagesView() {
       <SettingCard
         icon={<UserCheck className="w-5 h-5" />}
         title="Mensagem de Assumir Atendimento"
-        description="Enviada quando um agente assume o ticket. Use {'{{agente}}'} para o nome do atendente."
+        description="Enviada quando um agente assume o ticket. Use {{agente}} para o nome do atendente."
       >
         <textarea
           value={form.takeover_message}
