@@ -208,14 +208,104 @@ async function uploadInboundMedia(
   }
 }
 
+async function messageAlreadyStored(whatsappMessageId: string): Promise<boolean> {
+  const { data } = await supabase
+    .from('messages')
+    .select('id')
+    .eq('whatsapp_message_id', whatsappMessageId)
+    .maybeSingle();
+  return Boolean(data?.id);
+}
+
+/**
+ * Messages sent from the linked WhatsApp phone/Web app (fromMe).
+ * Persists as agent-side history without triage/unread/bot side effects.
+ */
+async function handleFromMeMessage(msg: WAMessage) {
+  const jid = msg.key.remoteJid!;
+  const whatsappMessageId = msg.key.id || null;
+
+  if (whatsappMessageId && (await messageAlreadyStored(whatsappMessageId))) {
+    logger.debug({ id: whatsappMessageId }, 'Skipping fromMe echo already stored by outbound');
+    return;
+  }
+
+  const { phone, lid } = await resolveInboundPeer(msg, currentSocket);
+  if (!phone) {
+    logger.warn(
+      { id: whatsappMessageId, jid, alt: msg.key.remoteJidAlt, lid },
+      'Skipping fromMe: could not resolve phone number from LID/PN',
+    );
+    return;
+  }
+
+  const pushName = msg.pushName || 'Unknown';
+  const body = extractText(msg);
+  const mediaType = extractMediaType(msg);
+
+  if (mediaType === 'text' && !(body && body.trim())) {
+    logger.debug({ id: whatsappMessageId }, 'Skipping empty fromMe text message');
+    return;
+  }
+
+  const contact = await upsertContact(phone, pushName, { whatsappLid: lid });
+  enqueueProfilePictureFetch(phone);
+
+  let ticket = await getActiveTicket(contact.id);
+  if (!ticket) {
+    ticket = await createTicket(contact.id);
+  }
+
+  if (ticket.status === 'finished') return;
+
+  const { mediaUrl, mediaName } = await uploadInboundMedia(msg, mediaType);
+
+  if (mediaType !== 'text' && !mediaUrl && !(body && body.trim())) {
+    logger.warn({ id: whatsappMessageId, mediaType }, 'Skipping fromMe media without downloaded content');
+    return;
+  }
+
+  const contextInfo = extractContextInfo(msg);
+  const replyToMessageId = await resolveReplyToMessageId(ticket.id, contextInfo?.stanzaId);
+
+  const { error } = await supabase.from('messages').insert({
+    ticket_id: ticket.id,
+    sender_type: 'agent',
+    sender_id: null,
+    body,
+    media_type: mediaType,
+    media_url: mediaUrl,
+    media_name: mediaName,
+    whatsapp_message_id: whatsappMessageId,
+    whatsapp_delivered: true,
+    reply_to_message_id: replyToMessageId,
+  });
+
+  if (error) {
+    logger.error({ error }, 'Failed to insert fromMe message');
+    return;
+  }
+
+  await supabase
+    .from('tickets')
+    .update({ last_message_at: new Date().toISOString() })
+    .eq('id', ticket.id);
+
+  logger.info({ ticketId: ticket.id, id: whatsappMessageId }, 'Synced fromMe WhatsApp message');
+}
+
 export async function handleInboundMessage(msg: WAMessage) {
-  if (msg.key.fromMe) return;
   const jid = msg.key.remoteJid;
   if (!jid || jid.endsWith('@g.us') || jid === 'status@broadcast') return;
 
   // Skip undecrypted / protocol shells — do not create empty tickets
   if (!hasUsableContent(msg)) {
     logger.debug({ id: msg.key.id, jid }, 'Skipping inbound message without usable payload');
+    return;
+  }
+
+  if (msg.key.fromMe) {
+    await handleFromMeMessage(msg);
     return;
   }
 
@@ -249,7 +339,7 @@ export async function handleInboundMessage(msg: WAMessage) {
     // Prefer recording NPS on a recently finished ticket before opening a new one
     if (body) {
       const pendingNpsTicket = await getPendingNpsTicket(contact.id);
-      if (pendingNpsTicket) {
+      if (pendingNpsTicket && !pendingNpsTicket.bot_paused) {
         const handled = await handleNpsResponse(pendingNpsTicket.id, contact.id, body.trim());
         if (handled) return;
       }
@@ -257,7 +347,9 @@ export async function handleInboundMessage(msg: WAMessage) {
 
     ticket = await createTicket(contact.id);
     ticketJustCreated = true;
-    await sendBotGreetingIfNeeded(ticket.id, phone, lid);
+    if (!ticket.bot_paused) {
+      await sendBotGreetingIfNeeded(ticket.id, phone, lid);
+    }
   }
 
   if (ticket.status === 'finished') return;
@@ -297,7 +389,8 @@ export async function handleInboundMessage(msg: WAMessage) {
   }).eq('id', ticket.id);
 
   // Skip triage on the opening message (avoids treating "1"/"2" first contact as department pick)
-  if (body && ticket.status === 'triage' && !ticketJustCreated) {
+  // and while bot is manually paused on this ticket
+  if (body && ticket.status === 'triage' && !ticketJustCreated && !ticket.bot_paused) {
     await handleTriageMessage(ticket.id, phone, body.trim(), lid);
   }
 }

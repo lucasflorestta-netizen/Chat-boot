@@ -28,6 +28,8 @@ import {
   MoreVertical,
   MessageSquare,
   ChevronDown,
+  Bot,
+  PauseCircle,
 } from 'lucide-react';
 
 const NEAR_BOTTOM_PX = 120;
@@ -77,6 +79,7 @@ export function ChatDetail({
   const [transferTargetId, setTransferTargetId] = useState<string | null>(null);
   const [rightTab, setRightTab] = useState<'info' | 'history' | 'scheduled' | 'nps'>('info');
   const [showJumpLatest, setShowJumpLatest] = useState(false);
+  const [togglingBotPause, setTogglingBotPause] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -89,6 +92,21 @@ export function ChatDetail({
     stickToBottomRef.current = true;
     setShowJumpLatest(false);
   }, []);
+
+  const handleToggleBotPaused = async () => {
+    if (togglingBotPause) return;
+    setTogglingBotPause(true);
+    setShowActionsMenu(false);
+    try {
+      const { error } = await supabase
+        .from('tickets')
+        .update({ bot_paused: !ticket.bot_paused })
+        .eq('id', ticket.id);
+      if (error) console.error('Error toggling bot pause:', error);
+    } finally {
+      setTogglingBotPause(false);
+    }
+  };
 
   const handleScroll = () => {
     const el = scrollRef.current;
@@ -388,6 +406,15 @@ export function ChatDetail({
           </div>
 
           <div className="flex items-center gap-1">
+            {ticket.bot_paused && (
+              <span
+                className="hidden sm:inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md bg-warning-500/15 text-warning-400"
+                title="Bot pausado neste ticket"
+              >
+                <PauseCircle className="w-3.5 h-3.5" />
+                Bot pausado
+              </span>
+            )}
             {ticket.status === 'triage' && (
               <button onClick={onAssign} className="btn-primary text-xs px-3 py-1.5">
                 Assumir Atendimento
@@ -421,6 +448,23 @@ export function ChatDetail({
           <>
             <div className="fixed inset-0 z-10" onClick={() => setShowActionsMenu(false)} />
             <div className="absolute z-20 top-14 right-20 w-56 card p-1.5 shadow-2xl animate-fade-in">
+              <button
+                onClick={handleToggleBotPaused}
+                disabled={togglingBotPause}
+                className="w-full flex items-center gap-2 px-2.5 py-2 rounded-md hover:bg-ink-700 text-sm text-ink-100 disabled:opacity-50"
+              >
+                {ticket.bot_paused ? (
+                  <>
+                    <Bot className="w-4 h-4 text-success-500" />
+                    Retomar bot
+                  </>
+                ) : (
+                  <>
+                    <PauseCircle className="w-4 h-4 text-warning-400" />
+                    Pausar bot
+                  </>
+                )}
+              </button>
               <button
                 onClick={() => {
                   setShowTransfer(true);

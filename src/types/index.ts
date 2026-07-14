@@ -42,6 +42,7 @@ export interface Ticket {
   priority: Priority;
   unread_count: number;
   last_message_at: string;
+  bot_paused: boolean;
   created_at: string;
   updated_at: string;
   finished_at: string | null;

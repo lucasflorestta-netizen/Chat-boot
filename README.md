@@ -92,7 +92,7 @@ O banco de dados é hospedado no Supabase (PostgreSQL). Todas as tabelas têm RL
 |---|---|
 | `profiles` | Extensão de `auth.users` com nome, role (admin/agent), departamento, limite de chats, horário de expediente |
 | `contacts` | Contatos do WhatsApp (nome, telefone, foto de perfil) |
-| `tickets` | Conversas/tickets com status (triage/attending/finished), departamento, atendente atribuído |
+| `tickets` | Conversas/tickets com status (triage/attending/finished), departamento, atendente, `bot_paused` |
 | `messages` | Mensagens com suporte a texto, imagem, áudio, arquivo, notas internas e rastreamento de exclusão |
 | `tags` | Etiquetas coloridas para organização de tickets |
 | `ticket_tags` | Relação N:N entre tickets e tags |
@@ -161,7 +161,8 @@ App.tsx
 - Cada conversa funciona como um Ticket
 - Interface de chat com foto, nome e telefone do cliente
 - Suporte a emojis, envio de arquivos/fotos/áudios
-- **Mensagem Apagada:** tag visual "Mensagem apagada pelo cliente" com conteúdo original preservado
+- **Histórico preservado:** se o cliente apagar uma mensagem no WhatsApp, ela permanece intacta no painel para o agente
+- **Pausar bot (por ticket):** no menu de ações, pausa greeting/menu/triagem/NPS enquanto o contato fala com outro bot; mensagens do cliente continuam sendo gravadas
 - **Notas Internas:** observações com fundo amarelo, visíveis apenas para atendantes
 - **Transferência:** transferir ticket para outro agente ou voltar para triagem
 - **Etiquetas:** aplicar tags coloridas aos tickets
@@ -173,6 +174,7 @@ App.tsx
 - Mensagem de boas-vindas automática para clientes novos
 - Menu numérico (1-Suporte, 2-Vendas)
 - Roteamento automático por departamento
+- Pausável por ticket quando há outro bot integrado ativo
 
 ### 4. Recursos Avançados
 - Sistema de Tags/Etiquetas coloridas
@@ -180,6 +182,7 @@ App.tsx
 - Notas Internas (não enviadas ao WhatsApp)
 - Transferência de Atendimento
 - Notificações visuais e sonoras no navegador
+- Sincronização de mensagens enviadas pelo WhatsApp oficial (celular/Web) para o painel
 
 ### 5. Agenda de Contatos
 - Sincronização de contatos
@@ -335,22 +338,26 @@ WhatsApp Bridge  ───────────┘  (service role key)
 
 2. **Recebimento:**
    - Mensagem WhatsApp → bridge cria/atualiza `contacts`, `tickets`, `messages`
-   - Bot envia saudação + menu se ticket em triagem
+   - Mensagens enviadas pelo app oficial (celular/Web) no número vinculado também são sincronizadas (`fromMe`), com dedupe do eco do outbound do CRM
+   - Bot envia saudação + menu se ticket em triagem e `bot_paused = false`
    - Cliente digita `1` ou `2` → departamento atualizado
 
 3. **Envio:**
    - Agente insere mensagem com `whatsapp_delivered = false`
    - Bridge faz poll e envia via Baileys → marca `whatsapp_delivered = true`
 
-4. **Mensagem apagada:**
-   - Evento delete do Baileys → `is_deleted = true`, `original_body` preservado
+4. **Mensagem apagada no WhatsApp:**
+   - Evento revoke do Baileys é ignorado — a mensagem permanece intacta no CRM para o agente
 
-5. **Mensagens agendadas:**
+5. **Pausar bot:**
+   - Agente ativa `tickets.bot_paused` no chat → greeting, menu, triagem e NPS automáticos são ignorados naquele ticket; mensagens do cliente continuam sendo gravadas
+
+6. **Mensagens agendadas:**
    - Bridge faz poll em `scheduled_messages` e envia no horário
 
-6. **NPS:**
+7. **NPS:**
    - Ao finalizar ticket, mensagem de NPS é enfileirada
-   - Resposta 1-5 do cliente atualiza `nps_ratings`
+   - Resposta 1-5 do cliente atualiza `nps_ratings` (exceto se o ticket estiver com bot pausado)
 
 ### Deploy do Bridge
 
@@ -417,4 +424,6 @@ Quando o bot está ativo e um cliente novo envia mensagem:
 2. Envia mensagem de boas-vindas + menu de opções
 3. Cliente digita "1" → ticket categorizado como `support`
 4. Cliente digita "2" → ticket categorizado como `sales`
+
+Se o agente pausar o bot naquele ticket (`bot_paused`), os passos 2–4 e o NPS automático ficam desligados até retomar.
 5. Ticket aparece na fila de triagem para agentes do departamento correspondente
