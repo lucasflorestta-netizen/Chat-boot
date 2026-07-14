@@ -4,11 +4,12 @@ import {
   getActiveTicket,
   createTicket,
   upsertContact,
-  phoneFromJid,
+  resolveInboundPeer,
   currentSocket,
 } from './utils.js';
 import { handleTriageMessage, sendBotGreetingIfNeeded } from './bot/triage.js';
 import { handleNpsResponse } from './bot/nps.js';
+import { enqueueProfilePictureFetch } from './profile-pictures.js';
 
 type MediaKind = 'text' | 'image' | 'audio' | 'video' | 'file' | 'sticker';
 
@@ -34,6 +35,33 @@ function extractMediaType(msg: WAMessage): MediaKind {
   if (message.stickerMessage) return 'sticker';
   if (message.documentMessage) return 'file';
   return 'text';
+}
+
+function hasUsableContent(msg: WAMessage): boolean {
+  const message = msg.message;
+  if (!message) return false;
+
+  // Protocol / stub shells — skip (do not create empty tickets)
+  if (message.protocolMessage || message.senderKeyDistributionMessage) return false;
+
+  if (
+    message.imageMessage ||
+    message.audioMessage ||
+    message.videoMessage ||
+    message.documentMessage ||
+    message.stickerMessage
+  ) {
+    return true;
+  }
+
+  const text = extractText(msg);
+  if (text && text.trim()) return true;
+
+  return Boolean(
+    message.buttonsResponseMessage ||
+      message.listResponseMessage ||
+      message.templateButtonReplyMessage,
+  );
 }
 
 function extractMimeType(msg: WAMessage): string | null {
@@ -113,7 +141,9 @@ async function uploadInboundMedia(
     )) as Buffer;
 
     const mime = extractMimeType(msg);
-    const mediaName = extractMediaName(msg);
+    const mediaName =
+      extractMediaName(msg) ||
+      (mediaType === 'sticker' ? 'sticker.webp' : null);
     const ext = extensionFor(mediaType, mime, mediaName);
     const fileName = `inbound/${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${ext}`;
     const contentType = contentTypeForUpload(mime, mediaType);
@@ -138,20 +168,42 @@ async function uploadInboundMedia(
 export async function handleInboundMessage(msg: WAMessage) {
   if (msg.key.fromMe) return;
   const jid = msg.key.remoteJid;
-  if (!jid || jid.endsWith('@g.us')) return;
+  if (!jid || jid.endsWith('@g.us') || jid === 'status@broadcast') return;
 
-  const phone = phoneFromJid(jid);
+  // Skip undecrypted / protocol shells — do not create empty tickets
+  if (!hasUsableContent(msg)) {
+    logger.debug({ id: msg.key.id, jid }, 'Skipping inbound message without usable payload');
+    return;
+  }
+
+  const { phone, lid } = await resolveInboundPeer(msg, currentSocket);
+  if (!phone) {
+    logger.warn(
+      { id: msg.key.id, jid, alt: msg.key.remoteJidAlt, lid },
+      'Skipping inbound: could not resolve phone number from LID/PN',
+    );
+    return;
+  }
+
   const pushName = msg.pushName || 'Unknown';
   const body = extractText(msg);
   const mediaType = extractMediaType(msg);
   const whatsappMessageId = msg.key.id || null;
 
-  const contact = await upsertContact(phone, pushName);
+  // Avoid inserting empty text-only rows
+  if (mediaType === 'text' && !(body && body.trim())) {
+    logger.debug({ id: whatsappMessageId }, 'Skipping empty text message');
+    return;
+  }
+
+  const contact = await upsertContact(phone, pushName, { whatsappLid: lid });
+  enqueueProfilePictureFetch(phone);
+
   let ticket = await getActiveTicket(contact.id);
 
   if (!ticket) {
     ticket = await createTicket(contact.id);
-    await sendBotGreetingIfNeeded(ticket.id, phone);
+    await sendBotGreetingIfNeeded(ticket.id, phone, lid);
   }
 
   // NPS response on finished tickets
@@ -163,6 +215,12 @@ export async function handleInboundMessage(msg: WAMessage) {
   if (ticket.status === 'finished') return;
 
   const { mediaUrl, mediaName } = await uploadInboundMedia(msg, mediaType);
+
+  // If media message failed to download and has no text, skip empty row
+  if (mediaType !== 'text' && !mediaUrl && !(body && body.trim())) {
+    logger.warn({ id: whatsappMessageId, mediaType }, 'Skipping media message without downloaded content');
+    return;
+  }
 
   const { error } = await supabase.from('messages').insert({
     ticket_id: ticket.id,
@@ -187,7 +245,7 @@ export async function handleInboundMessage(msg: WAMessage) {
   }).eq('id', ticket.id);
 
   if (body && ticket.status === 'triage') {
-    await handleTriageMessage(ticket.id, phone, body.trim());
+    await handleTriageMessage(ticket.id, phone, body.trim(), lid);
   }
 }
 

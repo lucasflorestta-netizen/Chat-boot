@@ -382,8 +382,10 @@ pm2 start dist/index.js --name whatsapp-bridge
 
 - `SUPABASE_URL` — URL do projeto
 - `SUPABASE_SERVICE_ROLE_KEY` — chave service role (nunca no frontend)
-- `WHATSAPP_SESSION_SECRET` — opcional, criptografia da sessão
 - `BRIDGE_POLL_INTERVAL_MS` — intervalo de poll (default 5000ms)
+- `WHATSAPP_RESTORE_SESSION` — `1` para restaurar backup de sessão do Storage (cuidado com sessões antigas)
+
+**Nota sobre criptografia:** o WhatsApp sempre usa E2E na rede. O bridge (Baileys) descriptografa e o CRM grava texto/mídia em claro no Postgres/Storage. Não há criptografia adicional de mensagens no CRM; a sessão Baileys é armazenada em arquivos locais e no bucket privado `whatsapp-session`.
 
 ---
 

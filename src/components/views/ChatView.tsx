@@ -4,6 +4,7 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
 import type { Ticket, Message, Tag, Profile, ScheduledMessage, NpsRating } from '../../types';
 import { DEPARTMENT_LABELS, STATUS_LABELS } from '../../types';
+import { ContactAvatar } from '../ContactAvatar';
 import {
   Search,
   Tag as TagIcon,
@@ -25,7 +26,10 @@ import {
   MessageSquare,
   Inbox,
   CircleDot,
+  Loader2,
 } from 'lucide-react';
+
+const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 
 interface ChatViewProps {
   preselectedTicketId?: string | null;
@@ -51,15 +55,20 @@ export function ChatView({ preselectedTicketId, onConsumePreselect, onNotify }: 
     return tickets.filter((t) => t.department === profile?.department || t.status === 'triage');
   }, [tickets, profile]);
 
+  const openTickets = useMemo(
+    () => deptFiltered.filter((t) => t.status !== 'finished'),
+    [deptFiltered],
+  );
+
   const tabFiltered = useMemo(() => {
     switch (tab) {
       case 'triage': return deptFiltered.filter((t) => t.status === 'triage');
       case 'attending': return deptFiltered.filter((t) => t.status === 'attending');
       case 'finished': return deptFiltered.filter((t) => t.status === 'finished');
       case 'mine': return deptFiltered.filter((t) => t.assigned_to === profile?.id && t.status !== 'finished');
-      default: return deptFiltered;
+      default: return openTickets;
     }
-  }, [deptFiltered, tab, profile]);
+  }, [deptFiltered, openTickets, tab, profile]);
 
   const searched = useMemo(() => {
     let result = tabFiltered;
@@ -173,7 +182,7 @@ export function ChatView({ preselectedTicketId, onConsumePreselect, onNotify }: 
   };
 
   const tabConfig: { id: TabFilter; label: string; count: number; icon: React.ReactNode }[] = [
-    { id: 'all', label: 'Todos', count: deptFiltered.length, icon: <Inbox className="w-3.5 h-3.5" /> },
+    { id: 'all', label: 'Todos', count: openTickets.length, icon: <Inbox className="w-3.5 h-3.5" /> },
     { id: 'triage', label: 'Triagem', count: deptFiltered.filter((t) => t.status === 'triage').length, icon: <CircleDot className="w-3.5 h-3.5" /> },
     { id: 'attending', label: 'Em Atendimento', count: deptFiltered.filter((t) => t.status === 'attending').length, icon: <MessageSquare className="w-3.5 h-3.5" /> },
     { id: 'mine', label: 'Meus', count: deptFiltered.filter((t) => t.assigned_to === profile?.id && t.status !== 'finished').length, icon: <UserCog className="w-3.5 h-3.5" /> },
@@ -313,9 +322,11 @@ function TicketListItem({
     >
       {/* Avatar with status dot */}
       <div className="relative flex-shrink-0">
-        <div className="w-11 h-11 rounded-full bg-gradient-to-br from-ink-600 to-ink-700 flex items-center justify-center text-sm font-semibold text-ink-100">
-          {ticket.contact?.name?.charAt(0).toUpperCase() ?? '?'}
-        </div>
+        <ContactAvatar
+          name={ticket.contact?.name}
+          profilePicUrl={ticket.contact?.profile_pic_url}
+          size="md"
+        />
         <span className={`absolute bottom-0 right-0 w-3 h-3 ${statusDot} rounded-full border-2 border-ink-900`} />
       </div>
 
@@ -442,30 +453,51 @@ function ChatDetail({
   };
 
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !profile) return;
     setUploadError(null);
+
+    if (file.size > MAX_UPLOAD_BYTES) {
+      setUploadError('Arquivo muito grande (máximo 50 MB)');
+      e.target.value = '';
+      return;
+    }
+
     let mediaType: 'image' | 'audio' | 'file' | 'video' = 'file';
     if (file.type.startsWith('image/')) mediaType = 'image';
     else if (file.type.startsWith('audio/')) mediaType = 'audio';
     else if (file.type.startsWith('video/')) mediaType = 'video';
 
-    const fileName = `${ticket.id}/${Date.now()}-${file.name}`;
-    const { data: uploadData, error: uploadErr } = await supabase.storage.from('chat-media').upload(fileName, file);
+    setUploading(true);
+    const safeName = file.name.replace(/[^\w.\-()+ ]/g, '_');
+    const fileName = `${ticket.id}/${Date.now()}-${safeName}`;
+    const { data: uploadData, error: uploadErr } = await supabase.storage
+      .from('chat-media')
+      .upload(fileName, file, { contentType: file.type || 'application/octet-stream' });
+
     if (uploadErr || !uploadData) {
       setUploadError(uploadErr?.message || 'Falha ao enviar arquivo');
+      setUploading(false);
+      e.target.value = '';
       return;
     }
     const publicUrl = supabase.storage.from('chat-media').getPublicUrl(fileName).data.publicUrl;
 
-    await supabase.from('messages').insert({
+    const { error: insertErr } = await supabase.from('messages').insert({
       ticket_id: ticket.id, sender_type: 'agent', sender_id: profile.id,
       body: null, media_type: mediaType, media_url: publicUrl, media_name: file.name,
       whatsapp_delivered: false,
     });
-    await supabase.from('tickets').update({ last_message_at: new Date().toISOString() }).eq('id', ticket.id);
+
+    if (insertErr) {
+      setUploadError(insertErr.message);
+    } else {
+      await supabase.from('tickets').update({ last_message_at: new Date().toISOString() }).eq('id', ticket.id);
+    }
+    setUploading(false);
     e.target.value = '';
   };
 
@@ -508,9 +540,12 @@ function ChatDetail({
         {/* Chat header */}
         <div className="p-3 border-b border-ink-700 bg-ink-900 flex items-center gap-3">
           <div className="relative">
-            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-ink-600 to-ink-700 flex items-center justify-center text-sm font-semibold text-ink-100">
-              {ticket.contact?.name?.charAt(0).toUpperCase() ?? '?'}
-            </div>
+            <ContactAvatar
+              name={ticket.contact?.name}
+              profilePicUrl={ticket.contact?.profile_pic_url}
+              size="md"
+              className="!w-10 !h-10"
+            />
             <span className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-ink-900 ${
               ticket.status === 'triage' ? 'bg-warning-500' : ticket.status === 'attending' ? 'bg-brand-500' : 'bg-ink-500'
             }`} />
@@ -727,12 +762,24 @@ function ChatDetail({
             {uploadError && (
               <p className="text-xs text-danger-400 mb-1">{uploadError}</p>
             )}
+            {uploading && (
+              <p className="text-xs text-ink-300 mb-1 flex items-center gap-1.5">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                Enviando arquivo...
+              </p>
+            )}
 
             <div className="flex items-end gap-1.5">
               <div className="flex gap-0.5">
-                <label className="btn-ghost p-2 cursor-pointer rounded-lg" title="Enviar arquivo">
+                <label className={`btn-ghost p-2 rounded-lg ${uploading ? 'opacity-50 pointer-events-none' : 'cursor-pointer'}`} title="Enviar arquivo">
                   <Paperclip className="w-4 h-4" />
-                  <input type="file" className="hidden" onChange={handleFileUpload} />
+                  <input
+                    type="file"
+                    className="hidden"
+                    disabled={uploading}
+                    accept="image/*,audio/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip,.rar,.csv"
+                    onChange={handleFileUpload}
+                  />
                 </label>
                 <button onClick={() => setShowEmoji(!showEmoji)} className="btn-ghost p-2 rounded-lg" title="Emoji">
                   <Smile className="w-4 h-4" />
@@ -887,13 +934,19 @@ function MessageBubble({ message }: { message: Message }) {
             {message.media_type === 'image' && message.media_url && (
               <img src={message.media_url} alt={message.media_name || ''} className="rounded-lg mb-2 max-w-full" />
             )}
+            {message.media_type === 'sticker' && message.media_url && (
+              <img src={message.media_url} alt="Sticker" className="mb-2 max-w-[160px]" />
+            )}
             {message.media_type === 'audio' && message.media_url && (
               <audio controls src={message.media_url} className="w-full mb-2" />
             )}
+            {message.media_type === 'video' && message.media_url && (
+              <video controls src={message.media_url} className="rounded-lg mb-2 max-w-full" />
+            )}
             {message.media_type === 'file' && message.media_url && (
-              <a href={message.media_url} download={message.media_name || ''} className="flex items-center gap-2 text-sm text-white hover:underline mb-2">
+              <a href={message.media_url} download={message.media_name || ''} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-sm text-white hover:underline mb-2">
                 <Paperclip className="w-4 h-4" />
-                {message.media_name}
+                {message.media_name || 'Arquivo'}
               </a>
             )}
             {message.body && (
@@ -983,9 +1036,13 @@ function InfoPanel({ ticket }: { ticket: Ticket }) {
   return (
     <div className="p-4 space-y-4">
       <div className="text-center">
-        <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-ink-600 to-ink-700 flex items-center justify-center text-2xl font-bold text-ink-100 mx-auto mb-2">
-          {ticket.contact?.name?.charAt(0).toUpperCase() ?? '?'}
-        </div>
+        <ContactAvatar
+          name={ticket.contact?.name}
+          profilePicUrl={ticket.contact?.profile_pic_url}
+          size="lg"
+          rounded="2xl"
+          className="mx-auto mb-2"
+        />
         <p className="text-sm font-semibold text-white">{ticket.contact?.name}</p>
         <p className="text-xs text-ink-300">{ticket.contact?.phone}</p>
       </div>

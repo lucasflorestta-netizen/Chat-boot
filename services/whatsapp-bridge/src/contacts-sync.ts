@@ -1,6 +1,7 @@
 import type { Contact as BaileysContact } from '@whiskeysockets/baileys';
 import { logger } from './supabase.js';
 import { phoneFromJid, upsertContact } from './utils.js';
+import { enqueueProfilePictureFetch } from './profile-pictures.js';
 
 type CachedContact = {
   phone: string;
@@ -70,6 +71,7 @@ export async function syncBaileysContacts(contacts: Array<Partial<BaileysContact
 
     try {
       await upsertContact(phone, name, { preferName });
+      enqueueProfilePictureFetch(phone);
       processed += 1;
     } catch (err) {
       logger.warn({ err, phone }, 'Failed to upsert synced contact');
@@ -94,6 +96,7 @@ export async function flushContactCache(): Promise<number> {
   for (const entry of contactCache.values()) {
     try {
       await upsertContact(entry.phone, entry.name, { preferName: entry.preferName });
+      enqueueProfilePictureFetch(entry.phone, { force: true });
       processed += 1;
     } catch (err) {
       logger.warn({ err, phone: entry.phone }, 'Failed to flush cached contact');

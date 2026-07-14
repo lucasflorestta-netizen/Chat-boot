@@ -1,7 +1,18 @@
 import { supabase, logger, POLL_INTERVAL_MS } from './supabase.js';
-import { currentSocket, jidFromPhone } from './utils.js';
+import { currentSocket, resolveOutboundJid } from './utils.js';
 
 let processing = false;
+
+type ContactEmbed = { phone: string; whatsapp_lid?: string | null };
+type TicketEmbed = { contacts: ContactEmbed | ContactEmbed[] | null };
+
+function unwrapContact(msgTickets: unknown): ContactEmbed | null {
+  const ticketRaw = msgTickets as TicketEmbed | TicketEmbed[] | null;
+  const ticketData = Array.isArray(ticketRaw) ? ticketRaw[0] : ticketRaw;
+  const contacts = ticketData?.contacts;
+  if (!contacts) return null;
+  return Array.isArray(contacts) ? contacts[0] || null : contacts;
+}
 
 export async function processScheduledMessages() {
   if (processing) return;
@@ -14,7 +25,7 @@ export async function processScheduledMessages() {
 
     const { data: due, error } = await supabase
       .from('scheduled_messages')
-      .select('id, ticket_id, body, tickets(contacts(phone))')
+      .select('id, ticket_id, body, tickets(contacts(phone, whatsapp_lid))')
       .eq('sent', false)
       .lte('scheduled_for', now)
       .order('scheduled_for', { ascending: true })
@@ -26,16 +37,16 @@ export async function processScheduledMessages() {
     }
 
     for (const scheduled of due || []) {
-      const ticketData = scheduled.tickets as unknown as { contacts: { phone: string } | { phone: string }[] | null } | null;
-      const contacts = ticketData?.contacts;
-      const phone = Array.isArray(contacts) ? contacts[0]?.phone : contacts?.phone;
+      const contact = unwrapContact(scheduled.tickets);
+      const phone = contact?.phone;
+      const lid = contact?.whatsapp_lid || null;
       if (!phone || !scheduled.body) {
         await supabase.from('scheduled_messages').update({ sent: true }).eq('id', scheduled.id);
         continue;
       }
 
       try {
-        const jid = jidFromPhone(phone);
+        const jid = await resolveOutboundJid(sock, phone, lid);
         const result = await sock.sendMessage(jid, { text: scheduled.body });
 
         await supabase.from('messages').insert({
@@ -50,10 +61,10 @@ export async function processScheduledMessages() {
         await supabase.from('scheduled_messages').update({ sent: true }).eq('id', scheduled.id);
         await supabase.from('tickets').update({ last_message_at: new Date().toISOString() }).eq('id', scheduled.ticket_id);
 
-        logger.info({ scheduledId: scheduled.id }, 'Scheduled message sent');
+        logger.info({ scheduledId: scheduled.id, jid }, 'Scheduled message sent');
         await delay(2000);
       } catch (err) {
-        logger.error({ err, scheduledId: scheduled.id }, 'Failed to send scheduled message');
+        logger.error({ err, scheduledId: scheduled.id, phone, lid }, 'Failed to send scheduled message');
       }
     }
   } finally {

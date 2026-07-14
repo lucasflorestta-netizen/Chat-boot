@@ -3,6 +3,7 @@ import { useContacts, useWhatsappConnection } from '../../hooks/useData';
 import { supabase } from '../../lib/supabase';
 import { Search, Plus, RefreshCw, MessageSquare, Phone, Loader2, AlertCircle } from 'lucide-react';
 import type { Contact } from '../../types';
+import { ContactAvatar } from '../ContactAvatar';
 
 interface ContactsViewProps {
   onStartConversation: (ticketId: string) => void;
@@ -210,9 +211,12 @@ export function ContactsView({ onStartConversation }: ContactsViewProps) {
                 <tr key={contact.id} className="border-b border-ink-800 hover:bg-ink-800/50 transition-colors">
                   <td className="p-3">
                     <div className="flex items-center gap-2">
-                      <div className="w-8 h-8 rounded-lg bg-brand-600/30 flex items-center justify-center text-xs font-bold text-brand-300">
-                        {contact.name.charAt(0).toUpperCase()}
-                      </div>
+                      <ContactAvatar
+                        name={contact.name}
+                        profilePicUrl={contact.profile_pic_url}
+                        size="sm"
+                        rounded="lg"
+                      />
                       <span className="text-sm text-white">{contact.name}</span>
                     </div>
                   </td>

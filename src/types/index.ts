@@ -25,6 +25,7 @@ export interface Contact {
   id: string;
   name: string;
   phone: string;
+  whatsapp_lid: string | null;
   profile_pic_url: string | null;
   notes: string | null;
   created_at: string;

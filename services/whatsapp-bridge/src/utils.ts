@@ -1,4 +1,4 @@
-import type { WASocket } from '@whiskeysockets/baileys';
+import type { WAMessage, WASocket } from '@whiskeysockets/baileys';
 import { supabase } from './supabase.js';
 
 let connectionId: string | null = null;
@@ -25,33 +25,162 @@ export function jidFromPhone(phone: string): string {
   return `${digits}@s.whatsapp.net`;
 }
 
+export function jidFromLid(lid: string): string {
+  const digits = lid.replace(/\D/g, '');
+  return `${digits}@lid`;
+}
+
+export function isLidJid(jid: string | undefined | null): jid is string {
+  return Boolean(jid && jid.endsWith('@lid'));
+}
+
+export function isPnJid(jid: string | undefined | null): jid is string {
+  return Boolean(jid && jid.endsWith('@s.whatsapp.net'));
+}
+
+export type InboundPeer = {
+  phone: string | null;
+  lid: string | null;
+};
+
+/**
+ * Resolve real phone (PN) + LID from an inbound DM.
+ * Baileys 7 often delivers remoteJid as @lid with PN on remoteJidAlt.
+ */
+export async function resolveInboundPeer(msg: WAMessage, sock: WASocket | null): Promise<InboundPeer> {
+  const remoteJid = msg.key.remoteJid || null;
+  const alt = msg.key.remoteJidAlt || null;
+  const mapping = sock?.signalRepository?.lidMapping;
+
+  let phone: string | null = null;
+  let lid: string | null = null;
+
+  if (isLidJid(remoteJid)) {
+    lid = phoneFromJid(remoteJid);
+    if (isPnJid(alt)) {
+      phone = phoneFromJid(alt);
+    } else if (mapping) {
+      const pnJid = await mapping.getPNForLID(remoteJid);
+      if (pnJid && isPnJid(pnJid)) phone = phoneFromJid(pnJid);
+    }
+  } else if (isPnJid(remoteJid)) {
+    phone = phoneFromJid(remoteJid);
+    if (isLidJid(alt)) {
+      lid = phoneFromJid(alt);
+    } else if (mapping && phone) {
+      const lidJid = await mapping.getLIDForPN(remoteJid);
+      if (lidJid && isLidJid(lidJid)) lid = phoneFromJid(lidJid);
+    }
+  }
+
+  return {
+    phone: phone && phone.length >= 8 ? phone : null,
+    lid: lid && lid.length >= 8 ? lid : null,
+  };
+}
+
+/**
+ * Prefer LID addressing for outbound (Baileys 7 / avoids error 463).
+ * Also detects when contacts.phone was historically stored as LID digits.
+ */
+export async function resolveOutboundJid(
+  sock: WASocket,
+  phone: string,
+  lid?: string | null,
+): Promise<string> {
+  const mapping = sock.signalRepository?.lidMapping;
+  const phoneDigits = phone.replace(/\D/g, '');
+  const lidDigits = lid ? lid.replace(/\D/g, '') : '';
+
+  if (lidDigits) {
+    return jidFromLid(lidDigits);
+  }
+
+  if (mapping && phoneDigits) {
+    // Stored "phone" might actually be a LID from older inbound bugs
+    const pnFromLid = await mapping.getPNForLID(jidFromLid(phoneDigits));
+    if (pnFromLid && isPnJid(pnFromLid)) {
+      return jidFromLid(phoneDigits);
+    }
+
+    const mappedLid = await mapping.getLIDForPN(jidFromPhone(phoneDigits));
+    if (mappedLid && isLidJid(mappedLid)) {
+      return mappedLid.includes(':') ? `${phoneFromJid(mappedLid)}@lid` : mappedLid;
+    }
+  }
+
+  return jidFromPhone(phoneDigits);
+}
+
 export async function getContactByPhone(phone: string) {
   const { data } = await supabase.from('contacts').select('*').eq('phone', phone).maybeSingle();
+  return data;
+}
+
+export async function getContactByLid(lid: string) {
+  const digits = lid.replace(/\D/g, '');
+  const { data } = await supabase.from('contacts').select('*').eq('whatsapp_lid', digits).maybeSingle();
   return data;
 }
 
 export async function upsertContact(
   phone: string,
   name: string,
-  opts?: { preferName?: boolean },
+  opts?: { preferName?: boolean; profilePicUrl?: string | null; whatsappLid?: string | null },
 ) {
   const resolvedName = (name || '').trim() || 'Unknown';
-  const existing = await getContactByPhone(phone);
+  const lidDigits = opts?.whatsappLid ? opts.whatsappLid.replace(/\D/g, '') : null;
+
+  // Prefer lookup by real phone; fall back to lid (repairs contacts that stored LID as phone)
+  let existing = await getContactByPhone(phone);
+  if (!existing && lidDigits) {
+    existing = await getContactByLid(lidDigits);
+  }
+  // Legacy corruption: LID digits were stored in phone
+  if (!existing && lidDigits) {
+    existing = await getContactByPhone(lidDigits);
+  }
+
   if (existing) {
-    const shouldUpdate =
+    const updates: Record<string, unknown> = {};
+
+    // Repair: phone column held LID digits → replace with real PN
+    if (existing.phone !== phone) {
+      updates.phone = phone;
+    }
+
+    if (lidDigits && existing.whatsapp_lid !== lidDigits) {
+      updates.whatsapp_lid = lidDigits;
+    }
+
+    const shouldUpdateName =
       resolvedName !== 'Unknown' &&
       (existing.name === 'Unknown' ||
         (opts?.preferName === true && resolvedName !== existing.name));
 
-    if (shouldUpdate) {
-      await supabase.from('contacts').update({ name: resolvedName }).eq('id', existing.id);
-      return { ...existing, name: resolvedName };
+    if (shouldUpdateName) {
+      updates.name = resolvedName;
+    }
+
+    if (opts?.profilePicUrl && opts.profilePicUrl !== existing.profile_pic_url) {
+      updates.profile_pic_url = opts.profilePicUrl;
+    }
+
+    if (Object.keys(updates).length > 0) {
+      await supabase.from('contacts').update(updates).eq('id', existing.id);
+      return { ...existing, ...updates };
     }
     return existing;
   }
+
   const { data, error } = await supabase
     .from('contacts')
-    .insert({ phone, name: resolvedName })
+    .insert({
+      phone,
+      name: resolvedName,
+      ...(lidDigits ? { whatsapp_lid: lidDigits } : {}),
+      ...(opts?.profilePicUrl ? { profile_pic_url: opts.profilePicUrl } : {}),
+    })
     .select('*')
     .single();
   if (error) throw error;
