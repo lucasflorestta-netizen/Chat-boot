@@ -36,7 +36,7 @@ interface ChatDetailProps {
   ticket: Ticket;
   onAssign: () => void;
   onFinish: () => void;
-  onTransfer: (agentId: string | null) => void;
+  onTransfer: (agentId: string | null, options?: { notifyCustomer: boolean }) => void;
   onTagApplied: () => void;
   allTags: Tag[];
   allTickets: Ticket[];
@@ -74,6 +74,7 @@ export function ChatDetail({
   const [showNote, setShowNote] = useState(false);
   const [showTagModal, setShowTagModal] = useState(false);
   const [showTransfer, setShowTransfer] = useState(false);
+  const [transferTargetId, setTransferTargetId] = useState<string | null>(null);
   const [rightTab, setRightTab] = useState<'info' | 'history' | 'scheduled' | 'nps'>('info');
   const [showJumpLatest, setShowJumpLatest] = useState(false);
 
@@ -480,12 +481,21 @@ export function ChatDetail({
         {showTransfer && (
           <div
             className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 animate-fade-in"
-            onClick={() => setShowTransfer(false)}
+            onClick={() => {
+              setShowTransfer(false);
+              setTransferTargetId(null);
+            }}
           >
             <div className="card p-5 w-80" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center justify-between mb-3">
                 <h3 className="text-sm font-semibold text-white">Transferir Atendimento</h3>
-                <button onClick={() => setShowTransfer(false)} className="btn-ghost p-1">
+                <button
+                  onClick={() => {
+                    setShowTransfer(false);
+                    setTransferTargetId(null);
+                  }}
+                  className="btn-ghost p-1"
+                >
                   <X className="w-4 h-4" />
                 </button>
               </div>
@@ -493,6 +503,7 @@ export function ChatDetail({
                 onClick={() => {
                   onTransfer(null);
                   setShowTransfer(false);
+                  setTransferTargetId(null);
                 }}
                 className="w-full text-left px-3 py-2.5 rounded-lg hover:bg-ink-700 text-sm text-ink-100 mb-1 border border-ink-700"
               >
@@ -509,7 +520,7 @@ export function ChatDetail({
                     <button
                       key={p.id}
                       onClick={() => {
-                        onTransfer(p.id);
+                        setTransferTargetId(p.id);
                         setShowTransfer(false);
                       }}
                       className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-ink-700 text-sm text-ink-100"
@@ -523,6 +534,46 @@ export function ChatDetail({
                       </div>
                     </button>
                   ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Transfer notify choice modal */}
+        {transferTargetId && (
+          <div
+            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 animate-fade-in"
+            onClick={() => setTransferTargetId(null)}
+          >
+            <div className="card p-5 w-80" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-semibold text-white">Transferir Atendimento</h3>
+                <button onClick={() => setTransferTargetId(null)} className="btn-ghost p-1">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <p className="text-sm text-ink-200 mb-4">
+                Deseja transferir em silêncio ou avisar o cliente?
+              </p>
+              <div className="space-y-2">
+                <button
+                  onClick={() => {
+                    onTransfer(transferTargetId, { notifyCustomer: false });
+                    setTransferTargetId(null);
+                  }}
+                  className="w-full px-3 py-2.5 rounded-lg border border-ink-700 hover:bg-ink-700 text-sm text-ink-100"
+                >
+                  Transferir em silêncio
+                </button>
+                <button
+                  onClick={() => {
+                    onTransfer(transferTargetId, { notifyCustomer: true });
+                    setTransferTargetId(null);
+                  }}
+                  className="w-full px-3 py-2.5 rounded-lg btn-primary text-sm"
+                >
+                  Avisar o cliente
+                </button>
               </div>
             </div>
           </div>

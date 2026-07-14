@@ -135,14 +135,7 @@ export function ChatView({ preselectedTicketId, onConsumePreselect, onNotify }: 
       })
       .eq('id', ticket.id);
 
-    const { data: autoSettings } = await supabase
-      .from('auto_message_settings')
-      .select('takeover_message')
-      .maybeSingle();
-    const template =
-      autoSettings?.takeover_message ||
-      'Olá! Sou {{agente}} e vou continuar seu atendimento. Em que posso ajudar?';
-    const takeoverMsg = template.replace(/\{\{agente\}\}/g, profile.name || 'um agente');
+    const takeoverMsg = `Conversa assumida pelo ${profile.name || 'um agente'}`;
 
     await supabase.from('messages').insert({
       ticket_id: ticket.id,
@@ -163,15 +156,19 @@ export function ChatView({ preselectedTicketId, onConsumePreselect, onNotify }: 
       })
       .eq('id', ticket.id);
 
-    const closingMsg =
-      autoSettings?.closing_message || 'Seu atendimento foi finalizado. Obrigado pelo contato!';
-    await supabase.from('messages').insert({
-      ticket_id: ticket.id,
-      sender_type: 'system',
-      body: closingMsg,
-      media_type: 'text',
-      whatsapp_delivered: false,
-    });
+    const closingMsg = (
+      autoSettings?.closing_message ??
+      'Seu atendimento foi finalizado. Obrigado pelo contato!'
+    ).trim();
+    if (closingMsg) {
+      await supabase.from('messages').insert({
+        ticket_id: ticket.id,
+        sender_type: 'system',
+        body: closingMsg,
+        media_type: 'text',
+        whatsapp_delivered: false,
+      });
+    }
 
     if (autoSettings?.nps_active) {
       const npsQuestion =
@@ -192,12 +189,41 @@ export function ChatView({ preselectedTicketId, onConsumePreselect, onNotify }: 
     }
   };
 
-  const handleTransfer = async (ticket: Ticket, agentId: string | null) => {
+  const handleTransfer = async (
+    ticket: Ticket,
+    agentId: string | null,
+    options?: { notifyCustomer: boolean },
+  ) => {
     if (agentId) {
       await supabase
         .from('tickets')
         .update({ assigned_to: agentId, status: 'attending' })
         .eq('id', ticket.id);
+
+      const { data: agent } = await supabase
+        .from('profiles')
+        .select('name')
+        .eq('id', agentId)
+        .maybeSingle();
+      const agentName = agent?.name || 'um agente';
+
+      if (options?.notifyCustomer) {
+        await supabase.from('messages').insert({
+          ticket_id: ticket.id,
+          sender_type: 'system',
+          body: `Atendimento transferido para ${agentName}`,
+          media_type: 'text',
+          whatsapp_delivered: false,
+        });
+      } else {
+        await supabase.from('messages').insert({
+          ticket_id: ticket.id,
+          sender_type: 'system',
+          body: `Transferido em silêncio para ${agentName}`,
+          media_type: 'note',
+          whatsapp_delivered: true,
+        });
+      }
     } else {
       await supabase
         .from('tickets')
@@ -326,9 +352,15 @@ export function ChatView({ preselectedTicketId, onConsumePreselect, onNotify }: 
       {selectedTicket ? (
         <ChatDetail
           ticket={selectedTicket}
-          onAssign={() => handleAssign(selectedTicket)}
-          onFinish={() => handleFinish(selectedTicket)}
-          onTransfer={(agentId) => handleTransfer(selectedTicket, agentId)}
+          onAssign={() => {
+            void handleAssign(selectedTicket);
+          }}
+          onFinish={() => {
+            void handleFinish(selectedTicket);
+          }}
+          onTransfer={(agentId: string | null, options?: { notifyCustomer: boolean }) => {
+            void handleTransfer(selectedTicket, agentId, options);
+          }}
           onTagApplied={refetchTags}
           allTags={tags}
           allTickets={tickets}

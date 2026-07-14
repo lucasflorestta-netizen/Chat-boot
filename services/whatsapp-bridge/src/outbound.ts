@@ -2,7 +2,6 @@ import { supabase, logger, POLL_INTERVAL_MS } from './supabase.js';
 import { currentSocket, resolveOutboundJid } from './utils.js';
 
 let processing = false;
-
 /** In-memory retry counts so failed sends don't loop forever. */
 const failureCounts = new Map<string, number>();
 const MAX_SEND_ATTEMPTS = 5;

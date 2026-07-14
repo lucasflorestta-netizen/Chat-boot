@@ -8,7 +8,7 @@ const DEFAULT_SETTINGS: Omit<AutoMessageSettings, 'id' | 'updated_at'> = {
   greeting_message: 'Olá! Bem-vindo ao nosso atendimento. Como podemos ajudar?',
   bot_menu_active: true,
   bot_menu_message: 'Digite o número do setor desejado:\n1 - Suporte\n2 - Vendas',
-  takeover_message: 'Olá! Sou {{agente}} e vou continuar seu atendimento. Em que posso ajudar?',
+  takeover_message: 'Conversa assumida pelo {{agente}}',
   closing_message: 'Seu atendimento foi finalizado. Obrigado pelo contato!',
   nps_question: 'Como você avalia nosso atendimento hoje? Digite de 1 a 5.',
   nps_active: true,
@@ -63,7 +63,7 @@ export function AutoMessagesView() {
         greeting_message: form.greeting_message,
         bot_menu_active: form.bot_menu_active,
         bot_menu_message: form.bot_menu_message,
-        takeover_message: form.takeover_message,
+        takeover_message: 'Conversa assumida pelo {{agente}}',
         closing_message: form.closing_message,
         nps_question: form.nps_question,
         nps_active: form.nps_active,
@@ -186,18 +186,15 @@ export function AutoMessagesView() {
         </p>
       </SettingCard>
 
-      {/* Takeover message */}
+      {/* Takeover message — fixed text, not configurable */}
       <SettingCard
         icon={<UserCheck className="w-5 h-5" />}
         title="Mensagem de Assumir Atendimento"
-        description="Enviada quando um agente assume o ticket. Use {{agente}} para o nome do atendente."
+        description="Enviada automaticamente quando um agente assume o ticket. O nome do atendente é inserido no lugar de {{agente}}."
       >
-        <textarea
-          value={form.takeover_message}
-          onChange={(e) => setForm({ ...form, takeover_message: e.target.value })}
-          rows={3}
-          className="input resize-none"
-        />
+        <p className="text-sm text-ink-100 bg-ink-800 rounded-lg px-3 py-2.5 border border-ink-700">
+          Conversa assumida pelo {'{{agente}}'}
+        </p>
       </SettingCard>
 
       {/* Closing message */}
