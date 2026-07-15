@@ -1,17 +1,16 @@
 import { useState, useEffect, useRef } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { useWhatsappConnection } from '../../hooks/useData';
-import { supabase } from '../../lib/supabase';
+import { api } from '../../lib/api';
 import { QrCode, RefreshCw, Wifi, WifiOff, Loader2, AlertCircle } from 'lucide-react';
 
 export function WhatsappView() {
   const { connection, loading, refetch } = useWhatsappConnection();
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [bridgeWarning, setBridgeWarning] = useState(false);
+  const [apiWarning, setApiWarning] = useState(false);
   const generateLock = useRef(false);
 
-  // Poll while waiting for the bridge to publish a QR (Realtime alone can miss updates)
   useEffect(() => {
     if (connection?.status !== 'syncing' || connection?.qr_code) return;
     const interval = setInterval(() => {
@@ -22,15 +21,15 @@ export function WhatsappView() {
 
   useEffect(() => {
     if (connection?.status !== 'syncing') {
-      setBridgeWarning(false);
+      setApiWarning(false);
       return;
     }
     if (connection?.qr_code) {
-      setBridgeWarning(false);
+      setApiWarning(false);
       return;
     }
     const timer = setTimeout(() => {
-      setBridgeWarning(true);
+      setApiWarning(true);
     }, 20000);
     return () => clearTimeout(timer);
   }, [connection?.status, connection?.qr_code]);
@@ -40,38 +39,13 @@ export function WhatsappView() {
     generateLock.current = true;
     setGenerating(true);
     setError(null);
-    setBridgeWarning(false);
+    setApiWarning(false);
 
     try {
-      const { data: row, error: selectError } = await supabase
-        .from('whatsapp_connection')
-        .select('id')
-        .maybeSingle();
-
-      if (selectError) {
-        setError(selectError.message);
-        return;
-      }
-      if (!row?.id) {
-        setError('Registro de conexão não encontrado. Execute as migrations do Supabase.');
-        return;
-      }
-
-      // Clear qr_code so the bridge restarts pairing and publishes a fresh QR.
-      const { error: updateError } = await supabase
-        .from('whatsapp_connection')
-        .update({
-          qr_code: null,
-          status: 'syncing',
-        })
-        .eq('id', row.id);
-
-      if (updateError) {
-        setError(updateError.message);
-        return;
-      }
-
+      await api('/whatsapp/connect', { method: 'POST' });
       await refetch();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Falha ao conectar WhatsApp');
     } finally {
       setGenerating(false);
       generateLock.current = false;
@@ -79,18 +53,13 @@ export function WhatsappView() {
   };
 
   const handleDisconnect = async () => {
-    if (!connection?.id) return;
     setError(null);
-    const { error: updateError } = await supabase
-      .from('whatsapp_connection')
-      .update({
-        status: 'disconnected',
-        qr_code: null,
-        phone_number: null,
-      })
-      .eq('id', connection.id);
-    if (updateError) setError(updateError.message);
-    refetch();
+    try {
+      await api('/whatsapp/disconnect', { method: 'POST' });
+      await refetch();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Falha ao desconectar');
+    }
   };
 
   if (loading) {
@@ -107,7 +76,7 @@ export function WhatsappView() {
     <div className="p-6 space-y-6 max-w-2xl mx-auto">
       <div>
         <h2 className="text-xl font-bold text-white">Conexão WhatsApp</h2>
-        <p className="text-sm text-ink-300">Conecte seu WhatsApp Web ao sistema via WhatsApp Bridge</p>
+        <p className="text-sm text-ink-300">Conecte seu WhatsApp via API NestJS (Baileys)</p>
       </div>
 
       {error && (
@@ -116,15 +85,13 @@ export function WhatsappView() {
         </div>
       )}
 
-      {bridgeWarning && (
+      {apiWarning && (
         <div className="card p-4 border-warning-500/30 bg-warning-500/10 text-sm text-warning-400 flex items-start gap-2">
           <AlertCircle className="w-5 h-5 flex-shrink-0" />
           <div>
-            <p className="font-medium text-white">WhatsApp Bridge não detectado</p>
+            <p className="font-medium text-white">API WhatsApp offline</p>
             <p className="mt-1 text-ink-300">
-              Inicie o serviço bridge em outro terminal com{' '}
-              <code className="text-brand-300">npm run whatsapp:bridge:dev</code> e confira o arquivo{' '}
-              <code className="text-brand-300">services/whatsapp-bridge/.env</code>.
+              Verifique se a API Nest está rodando e se o módulo WhatsApp iniciou corretamente.
             </p>
           </div>
         </div>
@@ -183,7 +150,7 @@ export function WhatsappView() {
             ) : status === 'syncing' ? (
               <div className="flex flex-col items-center text-ink-400">
                 <Loader2 className="w-10 h-10 animate-spin mb-2" />
-                <p className="text-sm text-center">Aguardando QR do bridge...</p>
+                <p className="text-sm text-center">Aguardando QR da API...</p>
               </div>
             ) : (
               <div className="flex flex-col items-center text-ink-300">
@@ -209,11 +176,8 @@ export function WhatsappView() {
           <AlertCircle className="w-5 h-5 text-brand-400 flex-shrink-0 mt-0.5" />
           <div className="text-sm text-ink-200 space-y-1">
             <p className="font-medium text-white">Como funciona a integração?</p>
-            <p>O WhatsApp Bridge (serviço Node.js com Baileys) mantém a conexão ativa com o WhatsApp Web.</p>
-            <p>Mensagens recebidas viram tickets automaticamente. Mensagens enviadas pelos agentes são entregues ao cliente via WhatsApp.</p>
-            <p className="text-xs text-ink-300 pt-1">
-              O bridge deve estar rodando em paralelo ao frontend. Veja o README para instruções de deploy.
-            </p>
+            <p>A API NestJS mantém a sessão Baileys e expõe status/QR via HTTP e Socket.IO.</p>
+            <p>Mensagens recebidas viram tickets automaticamente. Mensagens dos agentes são entregues via WhatsApp.</p>
           </div>
         </div>
       </div>

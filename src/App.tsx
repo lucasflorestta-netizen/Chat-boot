@@ -25,7 +25,12 @@ function AppContent() {
     if (!profile) return 0;
     const visible = profile.role === 'admin'
       ? tickets
-      : tickets.filter((t) => t.department === profile.department || t.status === 'triage');
+      : tickets.filter(
+          (t) =>
+            t.status === 'triage' ||
+            (profile.sectorId != null && t.sectorId === profile.sectorId) ||
+            t.assigned_to === profile.id,
+        );
     return visible
       .filter((t) => t.status !== 'finished')
       .reduce((sum, t) => sum + (t.unread_count || 0), 0);

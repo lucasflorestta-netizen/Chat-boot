@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 interface ContactAvatarProps {
   name?: string | null;
@@ -26,12 +26,21 @@ export function ContactAvatar({
   const roundedClass = rounded === 'full' ? 'rounded-full' : rounded === 'lg' ? 'rounded-lg' : 'rounded-2xl';
   const showImage = Boolean(profilePicUrl) && !imgFailed;
 
+  useEffect(() => {
+    setImgFailed(false);
+  }, [profilePicUrl]);
+
   if (showImage) {
+    const isWaCdn = Boolean(profilePicUrl?.includes('pps.whatsapp.net'));
     return (
       <img
         key={profilePicUrl}
         src={profilePicUrl!}
         alt={name || 'Contato'}
+        // WhatsApp CDN blocks hotlinks that send a referrer; Storage URLs prefer default.
+        referrerPolicy={isWaCdn ? 'no-referrer' : undefined}
+        loading="lazy"
+        decoding="async"
         className={`${sizeClasses[size]} ${roundedClass} object-cover flex-shrink-0 ${className}`}
         onError={() => setImgFailed(true)}
       />

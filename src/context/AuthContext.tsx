@@ -1,100 +1,140 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
-import type { Session, User } from '@supabase/supabase-js';
-import { supabase } from '../lib/supabase';
+import { api, getToken, setToken } from '../lib/api';
+import { connectSocket, disconnectSocket, reconnectSocketWithToken } from '../lib/socket';
+import { mapProfile } from '../lib/mappers';
 import type { Profile } from '../types';
 
+interface AuthSession {
+  access_token: string;
+}
+
+interface AuthUser {
+  id: string;
+}
+
 interface AuthContextValue {
-  session: Session | null;
-  user: User | null;
+  session: AuthSession | null;
+  user: AuthUser | null;
   profile: Profile | null;
   profileError: string | null;
   loading: boolean;
-  signIn: (email: string, password: string) => Promise<{ error: string | null }>;
+  signIn: (usernameOrEmail: string, password: string) => Promise<{ error: string | null }>;
   signUp: (email: string, password: string, name: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
+  patchProfile: (partial: Partial<Profile>) => void;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [session, setSession] = useState<Session | null>(null);
-  const [user, setUser] = useState<User | null>(null);
+  const [session, setSession] = useState<AuthSession | null>(null);
+  const [user, setUser] = useState<AuthUser | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [profileError, setProfileError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const fetchProfile = async (uid: string) => {
-    const { data, error } = await supabase.from('profiles').select('*').eq('id', uid).maybeSingle();
-    if (error) {
-      setProfileError(error.message);
-      setProfile(null);
-      return;
-    }
-    if (!data) {
-      setProfileError('Perfil não encontrado. Aguarde alguns segundos e tente novamente.');
-      setProfile(null);
-      return;
-    }
+  const applyAuth = (token: string, rawUser: unknown) => {
+    setToken(token);
+    const mapped = mapProfile(rawUser);
+    setSession({ access_token: token });
+    setUser({ id: mapped.id });
+    setProfile(mapped);
     setProfileError(null);
-    setProfile(data as Profile);
+    reconnectSocketWithToken();
+  };
+
+  const clearAuth = () => {
+    setToken(null);
+    setSession(null);
+    setUser(null);
+    setProfile(null);
+    setProfileError(null);
+    disconnectSocket();
+  };
+
+  const fetchMe = async () => {
+    try {
+      const me = await api('/auth/me');
+      const mapped = mapProfile(me);
+      setProfile(mapped);
+      setUser({ id: mapped.id });
+      setProfileError(null);
+      connectSocket();
+    } catch (err) {
+      clearAuth();
+      setProfileError(err instanceof Error ? err.message : 'Falha ao carregar perfil');
+    }
   };
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        fetchProfile(session.user.id).finally(() => setLoading(false));
-      } else {
-        setLoading(false);
-      }
-    });
-
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      (async () => {
-        setSession(session);
-        setUser(session?.user ?? null);
-        if (session?.user) {
-          await fetchProfile(session.user.id);
-        } else {
-          setProfile(null);
-          setProfileError(null);
-        }
-        setLoading(false);
-      })();
-    });
-
-    return () => listener.subscription.unsubscribe();
+    const token = getToken();
+    if (!token) {
+      setLoading(false);
+      return;
+    }
+    setSession({ access_token: token });
+    fetchMe().finally(() => setLoading(false));
   }, []);
 
-  const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    return { error: error?.message ?? null };
+  const signIn = async (usernameOrEmail: string, password: string) => {
+    try {
+      const data = await api<{ access_token: string; user: unknown }>('/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ username: usernameOrEmail, password }),
+      });
+      applyAuth(data.access_token, data.user);
+      return { error: null };
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : 'Falha no login' };
+    }
   };
 
   const signUp = async (email: string, password: string, name: string) => {
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: { data: { name } },
-    });
-    return { error: error?.message ?? null };
+    try {
+      const data = await api<{ access_token: string; user: unknown }>('/auth/signup', {
+        method: 'POST',
+        body: JSON.stringify({
+          username: email,
+          email,
+          password,
+          name,
+        }),
+      });
+      applyAuth(data.access_token, data.user);
+      return { error: null };
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : 'Falha no cadastro' };
+    }
   };
 
   const signOut = async () => {
-    await supabase.auth.signOut();
-    setProfile(null);
-    setProfileError(null);
+    clearAuth();
   };
 
   const refreshProfile = async () => {
-    if (user) await fetchProfile(user.id);
+    if (!getToken()) return;
+    await fetchMe();
+  };
+
+  const patchProfile = (partial: Partial<Profile>) => {
+    setProfile((prev) => (prev ? { ...prev, ...partial } : prev));
   };
 
   return (
     <AuthContext.Provider
-      value={{ session, user, profile, profileError, loading, signIn, signUp, signOut, refreshProfile }}
+      value={{
+        session,
+        user,
+        profile,
+        profileError,
+        loading,
+        signIn,
+        signUp,
+        signOut,
+        refreshProfile,
+        patchProfile,
+      }}
     >
       {children}
     </AuthContext.Provider>

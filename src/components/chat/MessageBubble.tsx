@@ -171,9 +171,6 @@ export function MessageBubble({ message, contactName, onReply }: MessageBubblePr
             )}
 
             <div className="flex items-center gap-1 mt-0.5">
-              {!isClient && message.sender && (
-                <span className="text-[10px] text-white/60">{message.sender.name}</span>
-              )}
               <span className="text-[10px] text-white/50 ml-auto flex items-center gap-1">
                 {new Date(message.created_at).toLocaleTimeString('pt-BR', {
                   hour: '2-digit',

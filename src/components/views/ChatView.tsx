@@ -1,9 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTickets, useTags } from '../../hooks/useData';
-import { supabase } from '../../lib/supabase';
+import { api } from '../../lib/api';
+import { connectSocket } from '../../lib/socket';
+import { departmentLabel } from '../../lib/mappers';
 import { useAuth } from '../../context/AuthContext';
-import type { Ticket, Message } from '../../types';
-import { DEPARTMENT_LABELS } from '../../types';
+import type { Ticket } from '../../types';
+import {
+  getWallpaperId,
+  resolveWallpaper,
+  setWallpaperId,
+} from '../../lib/chatWallpapers';
 import { ContactAvatar } from '../ContactAvatar';
 import { ChatDetail } from '../chat/ChatDetail';
 import {
@@ -27,19 +33,42 @@ type TabFilter = 'all' | 'triage' | 'attending' | 'finished' | 'mine';
 
 export function ChatView({ preselectedTicketId, onConsumePreselect, onNotify }: ChatViewProps) {
   const { profile } = useAuth();
+  const isAdmin = profile?.role === 'admin';
   const [search, setSearch] = useState('');
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [filterTag, setFilterTag] = useState<string | null>(null);
-  const [tab, setTab] = useState<TabFilter>('all');
-  const [showRightPanel, setShowRightPanel] = useState(true);
+  const [tab, setTab] = useState<TabFilter>('triage');
+  const [wallpaperId, setWallpaperIdState] = useState(() => getWallpaperId(profile?.id));
 
   const { tickets, loading } = useTickets();
   const { tags, refetch: refetchTags } = useTags();
 
+  useEffect(() => {
+    setWallpaperIdState(getWallpaperId(profile?.id));
+  }, [profile?.id]);
+
+  useEffect(() => {
+    if (!isAdmin && tab !== 'triage' && tab !== 'mine') {
+      setTab('triage');
+    }
+  }, [isAdmin, tab]);
+
+  const wallpaper = resolveWallpaper(wallpaperId);
+
+  const handleWallpaperChange = (id: string) => {
+    setWallpaperIdState(id);
+    if (profile?.id) setWallpaperId(profile.id, id);
+  };
+
   const deptFiltered = useMemo(() => {
-    if (profile?.role === 'admin') return tickets;
-    return tickets.filter((t) => t.department === profile?.department || t.status === 'triage');
-  }, [tickets, profile]);
+    if (isAdmin) return tickets;
+    return tickets.filter(
+      (t) =>
+        t.status === 'triage' ||
+        (profile?.sectorId != null && t.sectorId === profile.sectorId) ||
+        t.assigned_to === profile?.id,
+    );
+  }, [tickets, profile, isAdmin]);
 
   const openTickets = useMemo(
     () => deptFiltered.filter((t) => t.status !== 'finished'),
@@ -76,7 +105,6 @@ export function ChatView({ preselectedTicketId, onConsumePreselect, onNotify }: 
     return result;
   }, [tabFiltered, search, filterTag]);
 
-  // Keep selected ticket in sync with latest data
   useEffect(() => {
     if (selectedTicket) {
       const updated = tickets.find((t) => t.id === selectedTicket.id);
@@ -86,7 +114,6 @@ export function ChatView({ preselectedTicketId, onConsumePreselect, onNotify }: 
     }
   }, [tickets, selectedTicket]);
 
-  // Handle preselection
   useEffect(() => {
     if (preselectedTicketId) {
       const ticket = tickets.find((t) => t.id === preselectedTicketId);
@@ -97,96 +124,38 @@ export function ChatView({ preselectedTicketId, onConsumePreselect, onNotify }: 
     }
   }, [preselectedTicketId, tickets, onConsumePreselect]);
 
-  // Notify on new client messages
   useEffect(() => {
     if (!profile) return;
-    const channel = supabase
-      .channel('new-message-notifications')
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'messages' },
-        (payload) => {
-          const msg = payload.new as Message;
-          if (msg.sender_type === 'client' && msg.ticket_id !== selectedTicket?.id) {
-            onNotify?.('message', 'Nova mensagem', 'Você recebeu uma nova mensagem de cliente');
-          }
-        },
-      )
-      .subscribe();
+    const socket = connectSocket();
+    const onMessage = (payload: { message?: { sender?: string; ticketId?: string }; ticket?: { id?: string } }) => {
+      const sender = payload?.message?.sender;
+      const tid = payload?.message?.ticketId ?? payload?.ticket?.id;
+      if ((sender === 'CONTATO' || sender === 'client') && tid && tid !== selectedTicket?.id) {
+        onNotify?.('message', 'Nova mensagem', 'Você recebeu uma nova mensagem de cliente');
+      }
+    };
+    socket.on('message.created', onMessage);
+    socket.on('new_message', onMessage);
     return () => {
-      supabase.removeChannel(channel);
+      socket.off('message.created', onMessage);
+      socket.off('new_message', onMessage);
     };
   }, [profile, onNotify, selectedTicket]);
 
   const handleSelectTicket = (ticket: Ticket) => {
     setSelectedTicket(ticket);
     if (ticket.unread_count > 0) {
-      supabase.from('tickets').update({ unread_count: 0 }).eq('id', ticket.id).then(() => {});
+      void api(`/tickets/${ticket.id}/read`, { method: 'PATCH' }).catch(() => {});
     }
   };
 
   const handleAssign = async (ticket: Ticket) => {
     if (!profile) return;
-    await supabase
-      .from('tickets')
-      .update({
-        status: 'attending',
-        assigned_to: profile.id,
-      })
-      .eq('id', ticket.id);
-
-    const takeoverMsg = `Conversa assumida pelo ${profile.name || 'um agente'}`;
-
-    await supabase.from('messages').insert({
-      ticket_id: ticket.id,
-      sender_type: 'system',
-      body: takeoverMsg,
-      media_type: 'text',
-      whatsapp_delivered: false,
-    });
+    await api(`/tickets/${ticket.id}/assign`, { method: 'PATCH' });
   };
 
   const handleFinish = async (ticket: Ticket) => {
-    const { data: autoSettings } = await supabase.from('auto_message_settings').select('*').maybeSingle();
-    await supabase
-      .from('tickets')
-      .update({
-        status: 'finished',
-        finished_at: new Date().toISOString(),
-      })
-      .eq('id', ticket.id);
-
-    const closingMsg = (
-      autoSettings?.closing_message ??
-      'Seu atendimento foi finalizado. Obrigado pelo contato!'
-    ).trim();
-    if (closingMsg) {
-      await supabase.from('messages').insert({
-        ticket_id: ticket.id,
-        sender_type: 'system',
-        body: closingMsg,
-        media_type: 'text',
-        whatsapp_delivered: false,
-      });
-    }
-
-    if (autoSettings?.nps_active) {
-      const npsQuestion =
-        autoSettings?.nps_question ||
-        'Como você avalia nosso atendimento hoje? Digite de 1 a 5.';
-      await supabase.from('messages').insert({
-        ticket_id: ticket.id,
-        sender_type: 'system',
-        body: npsQuestion,
-        media_type: 'text',
-        whatsapp_delivered: false,
-      });
-      await supabase.from('nps_ratings').insert({
-        ticket_id: ticket.id,
-        contact_id: ticket.contact_id,
-        rating: null,
-      });
-    }
+    await api(`/tickets/${ticket.id}/finish`, { method: 'PATCH' });
   };
 
   const handleTransfer = async (
@@ -194,42 +163,13 @@ export function ChatView({ preselectedTicketId, onConsumePreselect, onNotify }: 
     agentId: string | null,
     options?: { notifyCustomer: boolean },
   ) => {
-    if (agentId) {
-      await supabase
-        .from('tickets')
-        .update({ assigned_to: agentId, status: 'attending' })
-        .eq('id', ticket.id);
-
-      const { data: agent } = await supabase
-        .from('profiles')
-        .select('name')
-        .eq('id', agentId)
-        .maybeSingle();
-      const agentName = agent?.name || 'um agente';
-
-      if (options?.notifyCustomer) {
-        await supabase.from('messages').insert({
-          ticket_id: ticket.id,
-          sender_type: 'system',
-          body: `Atendimento transferido para ${agentName}`,
-          media_type: 'text',
-          whatsapp_delivered: false,
-        });
-      } else {
-        await supabase.from('messages').insert({
-          ticket_id: ticket.id,
-          sender_type: 'system',
-          body: `Transferido em silêncio para ${agentName}`,
-          media_type: 'note',
-          whatsapp_delivered: true,
-        });
-      }
-    } else {
-      await supabase
-        .from('tickets')
-        .update({ assigned_to: null, status: 'triage' })
-        .eq('id', ticket.id);
-    }
+    await api(`/tickets/${ticket.id}/transfer`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        assigneeId: agentId,
+        notifyCustomer: options?.notifyCustomer ?? false,
+      }),
+    });
   };
 
   const tabConfig: { id: TabFilter; label: string; count: number; icon: React.ReactNode }[] = [
@@ -266,6 +206,10 @@ export function ChatView({ preselectedTicketId, onConsumePreselect, onNotify }: 
     },
   ];
 
+  const visibleTabs = isAdmin
+    ? tabConfig
+    : tabConfig.filter((t) => t.id === 'triage' || t.id === 'mine');
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -276,7 +220,6 @@ export function ChatView({ preselectedTicketId, onConsumePreselect, onNotify }: 
 
   return (
     <div className="flex h-full overflow-hidden">
-      {/* ===================== LEFT: TICKET LIST ===================== */}
       <div className="w-80 border-r border-ink-700 flex flex-col bg-ink-900 flex-shrink-0">
         <div className="p-3 border-b border-ink-700">
           <h2 className="text-sm font-bold text-white mb-2">Conversas</h2>
@@ -303,7 +246,7 @@ export function ChatView({ preselectedTicketId, onConsumePreselect, onNotify }: 
         </div>
 
         <div className="flex gap-0.5 p-1.5 border-b border-ink-700 overflow-x-auto">
-          {tabConfig.map((t) => (
+          {visibleTabs.map((t) => (
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
@@ -348,7 +291,6 @@ export function ChatView({ preselectedTicketId, onConsumePreselect, onNotify }: 
         </div>
       </div>
 
-      {/* ===================== CENTER: CHAT ===================== */}
       {selectedTicket ? (
         <ChatDetail
           ticket={selectedTicket}
@@ -363,12 +305,12 @@ export function ChatView({ preselectedTicketId, onConsumePreselect, onNotify }: 
           }}
           onTagApplied={refetchTags}
           allTags={tags}
-          allTickets={tickets}
-          showRightPanel={showRightPanel}
-          setShowRightPanel={setShowRightPanel}
+          wallpaperClassName={wallpaper.className}
+          wallpaperId={wallpaperId}
+          onWallpaperChange={handleWallpaperChange}
         />
       ) : (
-        <div className="flex-1 flex flex-col items-center justify-center chat-bg">
+        <div className={`flex-1 flex flex-col items-center justify-center ${wallpaper.className}`}>
           <div className="text-center">
             <div className="w-20 h-20 rounded-2xl bg-ink-800 flex items-center justify-center mx-auto mb-4">
               <MessageSquare className="w-10 h-10 text-ink-600" />
@@ -439,10 +381,18 @@ function TicketListItem({
             className="badge text-[9px] px-1.5 py-0.5"
             style={{ background: `${deptColor}20`, color: deptColor }}
           >
-            {DEPARTMENT_LABELS[ticket.department]}
+            {departmentLabel(ticket.department)}
           </span>
           {ticket.assigned_agent && (
-            <span className="text-[9px] text-ink-300 truncate">{ticket.assigned_agent.name}</span>
+            <span className="inline-flex items-center gap-1 text-[9px] text-ink-300 truncate max-w-full">
+              <ContactAvatar
+                name={ticket.assigned_agent.name}
+                profilePicUrl={ticket.assigned_agent.avatar_url}
+                size="sm"
+                className="!w-3.5 !h-3.5 !text-[7px]"
+              />
+              <span className="truncate">{ticket.assigned_agent.name}</span>
+            </span>
           )}
         </div>
         {ticket.tags && ticket.tags.length > 0 && (

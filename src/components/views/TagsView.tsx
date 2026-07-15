@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useTags } from '../../hooks/useData';
-import { supabase } from '../../lib/supabase';
+import { api } from '../../lib/api';
 import { Plus, Trash2, Tag as TagIcon, Loader2, X } from 'lucide-react';
 import type { Tag } from '../../types';
 
@@ -17,7 +17,10 @@ export function TagsView() {
 
   const handleAdd = async () => {
     if (!name.trim()) return;
-    await supabase.from('tags').insert({ name: name.trim(), color });
+    await api('/tags', {
+      method: 'POST',
+      body: JSON.stringify({ name: name.trim(), color }),
+    });
     setName('');
     setColor(COLOR_OPTIONS[0]);
     setShowAdd(false);
@@ -26,7 +29,7 @@ export function TagsView() {
 
   const handleDelete = async (tag: Tag) => {
     if (confirm(`Remover a etiqueta "${tag.name}"?`)) {
-      await supabase.from('tags').delete().eq('id', tag.id);
+      await api(`/tags/${tag.id}`, { method: 'DELETE' });
       refetch();
     }
   };

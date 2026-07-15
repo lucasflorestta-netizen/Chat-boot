@@ -1,69 +1,88 @@
 import { useCallback, useEffect, useState } from 'react';
-import { supabase } from '../lib/supabase';
-import type { Ticket, Message, Contact, Tag, Profile, CannedResponse, AutoMessageSettings, WhatsappConnection, NpsRating, ScheduledMessage } from '../types';
+import { api } from '../lib/api';
+import { connectSocket, getSocket } from '../lib/socket';
+import {
+  mapAutoSettings,
+  mapCanned,
+  mapContact,
+  mapMessage,
+  mapProfile,
+  mapScheduled,
+  mapTag,
+  mapTicket,
+  mapWhatsappStatus,
+} from '../lib/mappers';
+import type {
+  Ticket,
+  Message,
+  Contact,
+  Tag,
+  Profile,
+  CannedResponse,
+  AutoMessageSettings,
+  WhatsappConnection,
+  NpsRating,
+  ScheduledMessage,
+} from '../types';
 
-// ============================================================
-// TICKETS
-// ============================================================
-export function useTickets(filter?: { status?: string; department?: string; assignedTo?: string }) {
+function upsertById<T extends { id: string }>(list: T[], item: T): T[] {
+  const idx = list.findIndex((x) => x.id === item.id);
+  if (idx === -1) return [item, ...list];
+  const next = [...list];
+  next[idx] = item;
+  return next;
+}
+
+export function useTickets(_filter?: { status?: string; department?: string; assignedTo?: string }) {
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [loading, setLoading] = useState(true);
 
   const fetchTickets = useCallback(async () => {
-    let query = supabase
-      .from('tickets')
-      .select('*, contact:contacts(*), assigned_agent:profiles!tickets_assigned_to_fkey(*), tags:ticket_tags(tag:tags(*))')
-      .order('last_message_at', { ascending: false });
-
-    if (filter?.status) query = query.eq('status', filter.status);
-    if (filter?.department) query = query.eq('department', filter.department);
-    if (filter?.assignedTo) query = query.eq('assigned_to', filter.assignedTo);
-
-    const { data, error } = await query;
-    if (error) {
-      console.error('Error fetching tickets:', error);
-      return;
+    try {
+      const data = await api<any[]>('/tickets');
+      setTickets((data || []).map(mapTicket));
+    } catch (err) {
+      console.error('Error fetching tickets:', err);
+    } finally {
+      setLoading(false);
     }
-    const mapped = (data || []).map((t: any) => ({
-      ...t,
-      tags: t.tags?.map((tt: any) => tt.tag).filter(Boolean) ?? [],
-    }));
-    setTickets(mapped as Ticket[]);
-    setLoading(false);
-  }, [filter?.status, filter?.department, filter?.assignedTo]);
+  }, []);
 
   useEffect(() => {
     fetchTickets();
   }, [fetchTickets]);
 
   useEffect(() => {
-    const channel = supabase
-      .channel('tickets-changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'tickets' }, () => fetchTickets())
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    const socket = connectSocket();
+
+    const onCreated = (payload: { ticket: any }) => {
+      if (!payload?.ticket) return;
+      setTickets((prev) => upsertById(prev, mapTicket(payload.ticket)));
+    };
+    const onUpdated = (payload: { ticket: any }) => {
+      if (!payload?.ticket) return;
+      setTickets((prev) => upsertById(prev, mapTicket(payload.ticket)));
+    };
+    const onContact = () => {
+      void fetchTickets();
+    };
+
+    socket.on('ticket.created', onCreated);
+    socket.on('ticket.updated', onUpdated);
+    socket.on('ticket_updated', onUpdated);
+    socket.on('contact.updated', onContact);
+    socket.on('user.updated', onContact);
+
+    return () => {
+      socket.off('ticket.created', onCreated);
+      socket.off('ticket.updated', onUpdated);
+      socket.off('ticket_updated', onUpdated);
+      socket.off('contact.updated', onContact);
+      socket.off('user.updated', onContact);
+    };
   }, [fetchTickets]);
 
   return { tickets, loading, refetch: fetchTickets };
-}
-
-// ============================================================
-// MESSAGES
-// ============================================================
-const MESSAGE_SELECT =
-  '*, sender:profiles!messages_sender_id_fkey(*), reply_to:messages!reply_to_message_id(*)';
-
-async function fetchEnrichedMessage(id: string): Promise<Message | null> {
-  const { data, error } = await supabase
-    .from('messages')
-    .select(MESSAGE_SELECT)
-    .eq('id', id)
-    .maybeSingle();
-  if (error) {
-    console.error('Error enriching message:', error);
-    return null;
-  }
-  return data as Message | null;
 }
 
 export function useMessages(ticketId: string | null) {
@@ -74,71 +93,52 @@ export function useMessages(ticketId: string | null) {
     if (!ticketId) return;
     setLoading(true);
     setMessages([]);
-    supabase
-      .from('messages')
-      .select(MESSAGE_SELECT)
-      .eq('ticket_id', ticketId)
-      .order('created_at', { ascending: true })
-      .then(({ data, error }) => {
-        if (error) console.error('Error fetching messages:', error);
-        setMessages((data || []) as Message[]);
-        setLoading(false);
-      });
+    api<any>(`/tickets/${ticketId}`)
+      .then((ticket) => {
+        const msgs = (ticket.messages || []).map(mapMessage);
+        setMessages(msgs);
+      })
+      .catch((err) => console.error('Error fetching messages:', err))
+      .finally(() => setLoading(false));
   }, [ticketId]);
 
   useEffect(() => {
     if (!ticketId) return;
-    const channel = supabase
-      .channel(`messages-${ticketId}`)
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'messages', filter: `ticket_id=eq.${ticketId}` },
-        (payload) => {
-          const row = payload.new as Message;
-          setMessages((prev) => {
-            if (prev.some((m) => m.id === row.id)) {
-              return prev.map((m) => (m.id === row.id ? { ...m, ...row, _localStatus: undefined } : m));
-            }
-            // Drop matching optimistic temp rows (same body/media from this agent send)
-            const withoutTemp = prev.filter(
-              (m) => !(m.id.startsWith('temp-') && m.ticket_id === row.ticket_id && m.sender_id === row.sender_id
-                && m.body === row.body && m.media_type === row.media_type && m.media_url === row.media_url),
-            );
-            return [...withoutTemp, row];
-          });
-          void fetchEnrichedMessage(row.id).then((enriched) => {
-            if (!enriched) return;
-            setMessages((prev) =>
-              prev.map((m) => (m.id === enriched.id ? { ...enriched, _localStatus: undefined } : m)),
-            );
-          });
-        },
-      )
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'messages', filter: `ticket_id=eq.${ticketId}` },
-        (payload) => {
-          const row = payload.new as Message;
-          setMessages((prev) =>
-            prev.map((m) => {
-              if (m.id !== row.id) return m;
-              return {
-                ...m,
-                ...row,
-                sender: m.sender,
-                reply_to: m.reply_to,
-                _localStatus: undefined,
-              };
-            }),
-          );
-          void fetchEnrichedMessage(row.id).then((enriched) => {
-            if (!enriched) return;
-            setMessages((prev) => prev.map((m) => (m.id === enriched.id ? enriched : m)));
-          });
-        },
-      )
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    const socket = connectSocket();
+    socket.emit('joinTicket', ticketId);
+
+    const onMessage = (payload: { message?: any; ticket?: any }) => {
+      const raw = payload?.message;
+      if (!raw) return;
+      const ticketMatch = raw.ticketId === ticketId || payload?.ticket?.id === ticketId;
+      if (!ticketMatch) return;
+      const mapped = mapMessage(raw);
+      setMessages((prev) => {
+        if (prev.some((m) => m.id === mapped.id)) {
+          return prev.map((m) => (m.id === mapped.id ? { ...mapped, _localStatus: undefined } : m));
+        }
+        const withoutTemp = prev.filter(
+          (m) =>
+            !(
+              m.id.startsWith('temp-') &&
+              m.ticket_id === mapped.ticket_id &&
+              m.sender_id === mapped.sender_id &&
+              m.body === mapped.body &&
+              m.media_type === mapped.media_type
+            ),
+        );
+        return [...withoutTemp, mapped];
+      });
+    };
+
+    socket.on('message.created', onMessage);
+    socket.on('new_message', onMessage);
+
+    return () => {
+      socket.emit('leaveTicket', ticketId);
+      socket.off('message.created', onMessage);
+      socket.off('new_message', onMessage);
+    };
   }, [ticketId]);
 
   const appendOptimistic = useCallback((message: Message) => {
@@ -172,166 +172,293 @@ export function useMessages(ticketId: string | null) {
   };
 }
 
-// ============================================================
-// CONTACTS
-// ============================================================
 export function useContacts() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [loading, setLoading] = useState(true);
 
   const refetch = useCallback(async () => {
-    const { data, error } = await supabase.from('contacts').select('*').order('name', { ascending: true });
-    if (error) console.error('Error fetching contacts:', error);
-    setContacts((data || []) as Contact[]);
-    setLoading(false);
+    try {
+      const data = await api<any[]>('/contacts');
+      setContacts((data || []).map(mapContact));
+    } catch (err) {
+      console.error('Error fetching contacts:', err);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  useEffect(() => { refetch(); }, [refetch]);
+  useEffect(() => {
+    refetch();
+  }, [refetch]);
 
   useEffect(() => {
-    const channel = supabase
-      .channel('contacts-changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'contacts' }, () => refetch())
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    const socket = connectSocket();
+    const onContact = (payload: { contact: any }) => {
+      if (!payload?.contact) {
+        void refetch();
+        return;
+      }
+      const mapped = mapContact(payload.contact);
+      setContacts((prev) => {
+        const idx = prev.findIndex((c) => c.id === mapped.id);
+        if (idx === -1) return [...prev, mapped].sort((a, b) => a.name.localeCompare(b.name));
+        const next = [...prev];
+        next[idx] = mapped;
+        return next;
+      });
+    };
+    socket.on('contact.updated', onContact);
+    return () => {
+      socket.off('contact.updated', onContact);
+    };
   }, [refetch]);
 
   return { contacts, loading, refetch };
 }
 
-// ============================================================
-// TAGS
-// ============================================================
 export function useTags() {
   const [tags, setTags] = useState<Tag[]>([]);
   const [loading, setLoading] = useState(true);
 
   const refetch = useCallback(async () => {
-    const { data, error } = await supabase.from('tags').select('*').order('name');
-    if (error) console.error('Error fetching tags:', error);
-    setTags((data || []) as Tag[]);
-    setLoading(false);
+    try {
+      const data = await api<any[]>('/tags');
+      setTags((data || []).map(mapTag));
+    } catch (err) {
+      console.error('Error fetching tags:', err);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  useEffect(() => { refetch(); }, [refetch]);
+  useEffect(() => {
+    refetch();
+  }, [refetch]);
   return { tags, loading, refetch };
 }
 
-// ============================================================
-// PROFILES (users)
-// ============================================================
 export function useProfiles() {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
 
   const refetch = useCallback(async () => {
-    const { data, error } = await supabase.from('profiles').select('*').order('created_at', { ascending: true });
-    if (error) console.error('Error fetching profiles:', error);
-    setProfiles((data || []) as Profile[]);
-    setLoading(false);
+    try {
+      const data = await api<any[]>('/users');
+      setProfiles((data || []).map(mapProfile));
+    } catch (err) {
+      console.error('Error fetching profiles:', err);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  useEffect(() => { refetch(); }, [refetch]);
+  useEffect(() => {
+    refetch();
+  }, [refetch]);
+
+  useEffect(() => {
+    const socket = connectSocket();
+    const onUser = () => {
+      void refetch();
+    };
+    socket.on('user.updated', onUser);
+    return () => {
+      socket.off('user.updated', onUser);
+    };
+  }, [refetch]);
+
   return { profiles, loading, refetch };
 }
 
-// ============================================================
-// CANNED RESPONSES
-// ============================================================
 export function useCannedResponses() {
   const [canned, setCanned] = useState<CannedResponse[]>([]);
   const [loading, setLoading] = useState(true);
 
   const refetch = useCallback(async () => {
-    const { data, error } = await supabase.from('canned_responses').select('*').order('shortcut');
-    if (error) console.error('Error fetching canned responses:', error);
-    setCanned((data || []) as CannedResponse[]);
-    setLoading(false);
+    try {
+      const data = await api<any[]>('/quick-messages');
+      setCanned((data || []).map(mapCanned));
+    } catch (err) {
+      console.error('Error fetching canned responses:', err);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  useEffect(() => { refetch(); }, [refetch]);
+  useEffect(() => {
+    refetch();
+  }, [refetch]);
   return { canned, loading, refetch };
 }
 
-// ============================================================
-// AUTO MESSAGE SETTINGS
-// ============================================================
 export function useAutoMessageSettings() {
   const [settings, setSettings] = useState<AutoMessageSettings | null>(null);
   const [loading, setLoading] = useState(true);
 
   const refetch = useCallback(async () => {
-    const { data, error } = await supabase.from('auto_message_settings').select('*').maybeSingle();
-    if (error) console.error('Error fetching auto settings:', error);
-    setSettings(data as AutoMessageSettings | null);
-    setLoading(false);
+    try {
+      const data = await api<any>('/auto-message-settings');
+      setSettings(data ? mapAutoSettings(data) : null);
+    } catch (err) {
+      console.error('Error fetching auto settings:', err);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  useEffect(() => { refetch(); }, [refetch]);
+  useEffect(() => {
+    refetch();
+  }, [refetch]);
   return { settings, loading, refetch };
 }
 
-// ============================================================
-// WHATSAPP CONNECTION
-// ============================================================
 export function useWhatsappConnection() {
   const [connection, setConnection] = useState<WhatsappConnection | null>(null);
   const [loading, setLoading] = useState(true);
 
   const refetch = useCallback(async () => {
-    const { data, error } = await supabase.from('whatsapp_connection').select('*').maybeSingle();
-    if (error) console.error('Error fetching whatsapp connection:', error);
-    setConnection(data as WhatsappConnection | null);
-    setLoading(false);
+    try {
+      const data = await api<any>('/whatsapp/status');
+      setConnection(mapWhatsappStatus(data));
+    } catch (err) {
+      console.error('Error fetching whatsapp connection:', err);
+      setConnection(mapWhatsappStatus({ status: 'disconnected' }));
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  useEffect(() => { refetch(); }, [refetch]);
+  useEffect(() => {
+    refetch();
+  }, [refetch]);
 
   useEffect(() => {
-    const channel = supabase
-      .channel('whatsapp-connection-changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'whatsapp_connection' }, () => refetch())
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, [refetch]);
+    const socket = connectSocket();
+
+    const onQr = (payload: { qr?: string }) => {
+      setConnection((prev) =>
+        mapWhatsappStatus({
+          ...(prev || {}),
+          status: 'syncing',
+          qr: payload?.qr ?? prev?.qr_code,
+          phoneNumber: prev?.phone_number,
+          lastConnectedAt: prev?.last_connected_at,
+        }),
+      );
+    };
+
+    const onStatus = (payload: any) => {
+      setConnection((prev) =>
+        mapWhatsappStatus({
+          ...payload,
+          qr: payload?.hasQr === false ? null : prev?.qr_code,
+        }),
+      );
+    };
+
+    socket.on('nge-qrcode', onQr);
+    socket.on('whatsapp:status', onStatus);
+
+    return () => {
+      socket.off('nge-qrcode', onQr);
+      socket.off('whatsapp:status', onStatus);
+    };
+  }, []);
 
   return { connection, loading, refetch };
 }
 
-// ============================================================
-// NPS RATINGS
-// ============================================================
 export function useNpsRatings() {
   const [ratings, setRatings] = useState<NpsRating[]>([]);
   const [loading, setLoading] = useState(true);
+  const [summary, setSummary] = useState<{
+    total: number;
+    average: number | null;
+    distribution: Record<number, number>;
+  } | null>(null);
 
   const refetch = useCallback(async () => {
-    const { data, error } = await supabase.from('nps_ratings').select('*').order('created_at', { ascending: false });
-    if (error) console.error('Error fetching NPS ratings:', error);
-    setRatings((data || []) as NpsRating[]);
-    setLoading(false);
+    try {
+      const data = await api<{
+        total: number;
+        average: number | null;
+        distribution: Record<number, number>;
+        recent: { rating: number | null; createdAt: string }[];
+      }>('/dashboard/nps');
+      setSummary({
+        total: data.total,
+        average: data.average,
+        distribution: data.distribution,
+      });
+      setRatings(
+        (data.recent || []).map((r, i) => ({
+          id: `nps-${i}-${r.createdAt}`,
+          ticket_id: '',
+          contact_id: '',
+          rating: r.rating,
+          created_at: r.createdAt,
+        })),
+      );
+    } catch (err) {
+      console.error('Error fetching NPS ratings:', err);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  useEffect(() => { refetch(); }, [refetch]);
-  return { ratings, loading, refetch };
+  useEffect(() => {
+    refetch();
+  }, [refetch]);
+  return { ratings, loading, refetch, summary };
 }
 
-// ============================================================
-// SCHEDULED MESSAGES
-// ============================================================
 export function useScheduledMessages(ticketId?: string) {
   const [scheduled, setScheduled] = useState<ScheduledMessage[]>([]);
   const [loading, setLoading] = useState(true);
 
   const refetch = useCallback(async () => {
-    let query = supabase.from('scheduled_messages').select('*').eq('sent', false).order('scheduled_for');
-    if (ticketId) query = query.eq('ticket_id', ticketId);
-    const { data, error } = await query;
-    if (error) console.error('Error fetching scheduled messages:', error);
-    setScheduled((data || []) as ScheduledMessage[]);
-    setLoading(false);
+    if (!ticketId) {
+      setScheduled([]);
+      setLoading(false);
+      return;
+    }
+    try {
+      const data = await api<any[]>(`/tickets/${ticketId}/scheduled`);
+      setScheduled((data || []).map(mapScheduled).filter((s) => !s.sent));
+    } catch (err) {
+      console.error('Error fetching scheduled messages:', err);
+    } finally {
+      setLoading(false);
+    }
   }, [ticketId]);
 
-  useEffect(() => { refetch(); }, [refetch]);
+  useEffect(() => {
+    refetch();
+  }, [refetch]);
   return { scheduled, loading, refetch };
+}
+
+export function useSectors() {
+  const [sectors, setSectors] = useState<{ id: string; name: string; triageOption?: number }[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const refetch = useCallback(async () => {
+    try {
+      const data = await api<any[]>('/sectors');
+      setSectors(data || []);
+    } catch (err) {
+      console.error('Error fetching sectors:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refetch();
+  }, [refetch]);
+  return { sectors, loading, refetch };
+}
+
+export function ensureSocketConnected() {
+  return getSocket() ?? connectSocket();
 }

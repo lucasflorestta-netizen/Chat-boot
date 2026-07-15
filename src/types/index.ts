@@ -1,5 +1,5 @@
 export type UserRole = 'admin' | 'agent';
-export type Department = 'admin' | 'support' | 'sales';
+export type Department = 'admin' | 'support' | 'sales' | (string & {});
 export type TicketStatus = 'triage' | 'attending' | 'finished';
 export type MessageType = 'text' | 'image' | 'audio' | 'file' | 'video' | 'note' | 'sticker';
 export type SenderType = 'client' | 'agent' | 'bot' | 'system';
@@ -11,6 +11,7 @@ export interface Profile {
   email: string | null;
   role: UserRole;
   department: Department;
+  sectorId?: string | null;
   max_concurrent_chats: number;
   work_start: string | null;
   work_end: string | null;
@@ -37,6 +38,7 @@ export interface Ticket {
   contact_id: string;
   status: TicketStatus;
   department: Department;
+  sectorId?: string | null;
   assigned_to: string | null;
   subject: string | null;
   priority: Priority;
@@ -72,7 +74,7 @@ export interface Message {
   sender?: Profile | null;
   /** Quoted message preview (joined via reply_to_message_id). */
   reply_to?: Message | null;
-  /** Optimistic / failed local status — never comes from Supabase. */
+  /** Optimistic / failed local status — not from the API. */
   _localStatus?: LocalSendStatus;
 }
 

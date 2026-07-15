@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useContacts, useWhatsappConnection } from '../../hooks/useData';
-import { supabase } from '../../lib/supabase';
+import { api } from '../../lib/api';
 import { Search, Plus, RefreshCw, MessageSquare, Phone, Loader2, AlertCircle } from 'lucide-react';
 import type { Contact } from '../../types';
 import { ContactAvatar } from '../ContactAvatar';
@@ -28,15 +28,18 @@ export function ContactsView({ onStartConversation }: ContactsViewProps) {
     if (!newName.trim() || !newPhone.trim()) return;
     setError(null);
     const phone = newPhone.replace(/\D/g, '');
-    const { error: insertError } = await supabase.from('contacts').insert({ name: newName.trim(), phone });
-    if (insertError) {
-      setError(insertError.message);
-      return;
+    try {
+      await api('/contacts', {
+        method: 'POST',
+        body: JSON.stringify({ name: newName.trim(), phone }),
+      });
+      setNewName('');
+      setNewPhone('');
+      setShowAdd(false);
+      refetch();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Falha ao criar contato');
     }
-    setNewName('');
-    setNewPhone('');
-    setShowAdd(false);
-    refetch();
   };
 
   const handleSync = async () => {
@@ -50,72 +53,32 @@ export function ContactsView({ onStartConversation }: ContactsViewProps) {
       return;
     }
 
-    const requestedAt = new Date().toISOString();
-    const baselineCount = contacts.length;
-    const { error: syncError } = await supabase
-      .from('whatsapp_connection')
-      .update({ contacts_sync_requested_at: requestedAt })
-      .eq('id', connection.id);
-
-    if (syncError) {
-      setSyncing(false);
-      setError(syncError.message);
-      return;
-    }
-
-    // History + app-state sync can take a while after the bridge soft-restarts
-    let count: number | null = baselineCount;
-    for (let i = 0; i < 30; i++) {
-      await new Promise((r) => setTimeout(r, 2000));
+    try {
+      const result = await api<{ imported?: number; ok?: boolean }>('/whatsapp/sync-contacts', {
+        method: 'POST',
+      });
       await refetch();
-      const { count: current } = await supabase
-        .from('contacts')
-        .select('*', { count: 'exact', head: true });
-      count = current ?? 0;
-      if (count > baselineCount) break;
+      setSyncMessage(
+        `Agenda sincronizada. ${contacts.length} contatos na base${
+          result?.imported != null ? ` (${result.imported} importados)` : ''
+        }.`,
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Falha ao sincronizar');
+    } finally {
+      setSyncing(false);
     }
-
-    setSyncing(false);
-    setSyncMessage(
-      `Agenda sincronizada. ${count ?? 0} contatos na base. Contatos do WhatsApp também entram automaticamente ao conectar.`,
-    );
   };
 
   const handleStartConversation = async (contact: Contact) => {
     setError(null);
-    const { data: existing, error: findError } = await supabase
-      .from('tickets')
-      .select('id')
-      .eq('contact_id', contact.id)
-      .neq('status', 'finished')
-      .maybeSingle();
-
-    if (findError) {
-      setError(findError.message);
-      return;
-    }
-
-    if (existing) {
-      onStartConversation(existing.id);
-      return;
-    }
-
-    const { data, error: createError } = await supabase
-      .from('tickets')
-      .insert({
-        contact_id: contact.id,
-        status: 'triage',
-        department: 'support',
-      })
-      .select('id')
-      .single();
-
-    if (createError) {
-      setError(createError.message);
-      return;
-    }
-    if (data) {
-      onStartConversation(data.id);
+    try {
+      const ticket = await api<{ id: string }>(`/contacts/${contact.id}/start-conversation`, {
+        method: 'POST',
+      });
+      onStartConversation(ticket.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Falha ao iniciar conversa');
     }
   };
 

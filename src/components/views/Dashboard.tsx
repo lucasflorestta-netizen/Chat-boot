@@ -1,5 +1,6 @@
-import { useEffect, useState, useMemo } from 'react';
-import { supabase } from '../../lib/supabase';
+import { useEffect, useMemo, useState } from 'react';
+import { api } from '../../lib/api';
+import { mapContact, mapTicket } from '../../lib/mappers';
 import { useNpsRatings } from '../../hooks/useData';
 import {
   MessageSquare,
@@ -21,77 +22,63 @@ interface DashboardProps {
 export function Dashboard({ onNavigateToChat }: DashboardProps) {
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
-  const [finishedTickets, setFinishedTickets] = useState<Ticket[]>([]);
   const [avgResponseTime, setAvgResponseTime] = useState<string>('—');
   const [loading, setLoading] = useState(true);
-  const { ratings } = useNpsRatings();
+  const [metrics, setMetrics] = useState<{
+    openCount: number;
+    closedToday: number;
+    awaiting: number;
+    byStatus: { status: string; count: number }[];
+  } | null>(null);
+  const { summary: npsSummary } = useNpsRatings();
 
   useEffect(() => {
     (async () => {
-      const [{ data: tData }, { data: cData }] = await Promise.all([
-        supabase
-          .from('tickets')
-          .select('*, contact:contacts(*)')
-          .order('created_at', { ascending: false }),
-        supabase.from('contacts').select('*'),
-      ]);
+      try {
+        const [metricsData, ticketsData, contactsData] = await Promise.all([
+          api<any>('/dashboard/metrics'),
+          api<any[]>('/tickets'),
+          api<any[]>('/contacts'),
+        ]);
+        setMetrics(metricsData);
+        setTickets((ticketsData || []).map(mapTicket));
+        setContacts((contactsData || []).map(mapContact));
 
-      const allTickets = (tData || []) as unknown as Ticket[];
-      setTickets(allTickets);
-      setContacts((cData || []) as Contact[]);
-      setFinishedTickets(allTickets.filter((t) => t.status === 'finished'));
-
-      // Calculate avg response time from messages
-      const { data: msgData } = await supabase
-        .from('messages')
-        .select('ticket_id, sender_type, created_at')
-        .order('created_at', { ascending: true });
-
-      if (msgData && msgData.length > 0) {
-        const byTicket: Record<string, typeof msgData> = {};
-        msgData.forEach((m) => {
-          if (!byTicket[m.ticket_id]) byTicket[m.ticket_id] = [];
-          byTicket[m.ticket_id].push(m);
-        });
-
-        let totalMs = 0;
-        let count = 0;
-        Object.values(byTicket).forEach((msgs) => {
-          for (let i = 1; i < msgs.length; i++) {
-            if (msgs[i - 1].sender_type === 'client' && msgs[i].sender_type === 'agent') {
-              const diff = new Date(msgs[i].created_at).getTime() - new Date(msgs[i - 1].created_at).getTime();
-              if (diff > 0 && diff < 3600000 * 24) {
-                totalMs += diff;
-                count++;
-              }
-            }
-          }
-        });
-        if (count > 0) {
-          const avgMs = totalMs / count;
-          const mins = Math.floor(avgMs / 60000);
-          const secs = Math.floor((avgMs % 60000) / 1000);
-          setAvgResponseTime(`${mins}m ${secs}s`);
-        }
+        const attending = metricsData?.byStatus?.find((s: any) => s.status === 'EM_ATENDIMENTO')?.count;
+        const triage =
+          (metricsData?.byStatus?.find((s: any) => s.status === 'EM_TRIAGEM')?.count || 0) +
+          (metricsData?.awaiting || 0);
+        void attending;
+        void triage;
+        setAvgResponseTime('—');
+      } catch (err) {
+        console.error('Dashboard load error:', err);
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     })();
   }, []);
 
-  const activeCount = tickets.filter((t) => t.status === 'attending').length;
-  const triageCount = tickets.filter((t) => t.status === 'triage').length;
-  const finishedCount = finishedTickets.length;
+  const activeCount =
+    metrics?.byStatus?.find((s) => s.status === 'EM_ATENDIMENTO')?.count ??
+    tickets.filter((t) => t.status === 'attending').length;
+  const triageCount =
+    (metrics?.byStatus?.find((s) => s.status === 'EM_TRIAGEM')?.count ?? 0) +
+    (metrics?.awaiting ?? tickets.filter((t) => t.status === 'triage').length);
+  const finishedCount =
+    metrics?.byStatus?.find((s) => s.status === 'FECHADO')?.count ??
+    tickets.filter((t) => t.status === 'finished').length;
+  const finishedTickets = tickets.filter((t) => t.status === 'finished');
 
   const npsData = useMemo(() => {
-    const rated = ratings.filter((r) => r.rating !== null);
-    const total = rated.length;
+    const total = npsSummary?.total ?? 0;
     const dist = [1, 2, 3, 4, 5].map((star) => ({
       star,
-      count: rated.filter((r) => r.rating === star).length,
+      count: npsSummary?.distribution?.[star] ?? 0,
     }));
-    const avg = total > 0 ? rated.reduce((s, r) => s + (r.rating || 0), 0) / total : 0;
+    const avg = npsSummary?.average ?? 0;
     return { total, dist, avg };
-  }, [ratings]);
+  }, [npsSummary]);
 
   const exportContactsCSV = () => {
     const headers = ['Nome', 'Telefone', 'Criado em'];
@@ -120,7 +107,7 @@ export function Dashboard({ onNavigateToChat }: DashboardProps) {
     downloadCSV(csv, 'tickets_finalizados.csv');
   };
 
-  const metrics = [
+  const metricCards = [
     {
       label: 'Conversas Ativas',
       value: activeCount,
@@ -144,7 +131,7 @@ export function Dashboard({ onNavigateToChat }: DashboardProps) {
     },
     {
       label: 'Tickets em Aberto',
-      value: triageCount,
+      value: triageCount || metrics?.openCount || 0,
       icon: <TicketIcon className="w-5 h-5" />,
       color: 'text-danger-400',
       bg: 'bg-danger-500/10',
@@ -178,9 +165,8 @@ export function Dashboard({ onNavigateToChat }: DashboardProps) {
         </div>
       </div>
 
-      {/* Metrics cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {metrics.map((m, i) => (
+        {metricCards.map((m, i) => (
           <div key={i} className="card p-5 hover:border-ink-600 transition-colors">
             <div className="flex items-center justify-between mb-3">
               <div className={`w-10 h-10 rounded-lg ${m.bg} ${m.color} flex items-center justify-center`}>
@@ -194,7 +180,6 @@ export function Dashboard({ onNavigateToChat }: DashboardProps) {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* NPS Chart */}
         <div className="card p-6">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
@@ -212,12 +197,12 @@ export function Dashboard({ onNavigateToChat }: DashboardProps) {
           ) : (
             <>
               <div className="flex items-center gap-3 mb-4">
-                <span className="text-3xl font-bold text-white">{npsData.avg.toFixed(1)}</span>
+                <span className="text-3xl font-bold text-white">{Number(npsData.avg).toFixed(1)}</span>
                 <div className="flex">
                   {[1, 2, 3, 4, 5].map((s) => (
                     <Star
                       key={s}
-                      className={`w-4 h-4 ${s <= Math.round(npsData.avg) ? 'text-warning-400 fill-warning-400' : 'text-ink-600'}`}
+                      className={`w-4 h-4 ${s <= Math.round(Number(npsData.avg)) ? 'text-warning-400 fill-warning-400' : 'text-ink-600'}`}
                     />
                   ))}
                 </div>
@@ -240,7 +225,6 @@ export function Dashboard({ onNavigateToChat }: DashboardProps) {
           )}
         </div>
 
-        {/* Recent tickets */}
         <div className="card p-6">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
@@ -281,7 +265,6 @@ export function Dashboard({ onNavigateToChat }: DashboardProps) {
         </div>
       </div>
 
-      {/* Contacts summary */}
       <div className="card p-6">
         <div className="flex items-center gap-2 mb-4">
           <Users className="w-5 h-5 text-brand-400" />

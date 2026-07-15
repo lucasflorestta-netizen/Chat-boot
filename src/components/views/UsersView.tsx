@@ -1,14 +1,16 @@
 import { useState } from 'react';
-import { useProfiles } from '../../hooks/useData';
+import { useProfiles, useSectors } from '../../hooks/useData';
 import { useAuth } from '../../context/AuthContext';
-import { supabase } from '../../lib/supabase';
-import type { Profile, Department, UserRole } from '../../types';
-import { DEPARTMENT_LABELS } from '../../types';
+import { api } from '../../lib/api';
+import { departmentLabel } from '../../lib/mappers';
+import type { Profile, UserRole } from '../../types';
+import { ContactAvatar } from '../ContactAvatar';
+import { AvatarUploadButton } from '../AvatarUploadButton';
 import { UserPlus, Trash2, Shield, Loader2, Save, X, Clock, Pencil, Calendar } from 'lucide-react';
 
 export function UsersView() {
   const { profiles, loading, refetch } = useProfiles();
-  const { profile: currentUser } = useAuth();
+  const { profile: currentUser, refreshProfile } = useAuth();
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState<Profile | null>(null);
 
@@ -44,9 +46,12 @@ export function UsersView() {
         {profiles.map((p) => (
           <div key={p.id} className="card p-4 hover:border-ink-600 transition-colors">
             <div className="flex items-start gap-3">
-              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center text-lg font-bold text-white">
-                {p.name.charAt(0).toUpperCase()}
-              </div>
+              <ContactAvatar
+                name={p.name}
+                profilePicUrl={p.avatar_url}
+                size="md"
+                rounded="lg"
+              />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
                   <p className="text-sm font-semibold text-white truncate">{p.name}</p>
@@ -61,13 +66,12 @@ export function UsersView() {
                     {p.role === 'admin' ? 'Administrador' : 'Agente'}
                   </span>
                   <span className="badge bg-ink-700 text-ink-200 text-xs">
-                    {DEPARTMENT_LABELS[p.department]}
+                    {departmentLabel(p.department)}
                   </span>
                 </div>
               </div>
             </div>
 
-            {/* Schedule summary */}
             <div className="mt-3 pt-3 border-t border-ink-700 space-y-1.5 text-xs">
               <div className="flex items-center justify-between">
                 <span className="text-ink-300 flex items-center gap-1.5">
@@ -101,7 +105,6 @@ export function UsersView() {
               </div>
             </div>
 
-            {/* Visual schedule bar */}
             <ScheduleBar
               workStart={p.work_start || '09:00'}
               workEnd={p.work_end || '18:00'}
@@ -118,15 +121,11 @@ export function UsersView() {
                 <button
                   onClick={async () => {
                     if (confirm(`Remover ${p.name}?`)) {
-                      const { data, error: fnError } = await supabase.functions.invoke('admin-delete-user', {
-                        body: { userId: p.id },
-                      });
-                      if (fnError) {
-                        alert(fnError.message);
-                      } else if (data?.error) {
-                        alert(data.error);
-                      } else {
+                      try {
+                        await api(`/users/${p.id}`, { method: 'DELETE' });
                         refetch();
+                      } catch (err) {
+                        alert(err instanceof Error ? err.message : 'Falha ao remover');
                       }
                     }
                   }}
@@ -144,17 +143,17 @@ export function UsersView() {
         <EditUserModal
           user={editing}
           onClose={() => setEditing(null)}
-          onSaved={() => { setEditing(null); refetch(); }}
+          onSaved={() => {
+            setEditing(null);
+            refetch();
+            if (editing.id === currentUser?.id) void refreshProfile();
+          }}
         />
       )}
     </div>
   );
 }
 
-// ============================================================
-// VISUAL SCHEDULE BAR
-// Shows a 24h timeline with work hours (blue) and lunch (yellow)
-// ============================================================
 function ScheduleBar({
   workStart,
   workEnd,
@@ -185,19 +184,16 @@ function ScheduleBar({
   return (
     <div className="mt-3">
       <div className="relative h-5 bg-ink-800 rounded-md overflow-hidden">
-        {/* Work hours bar */}
         <div
           className="absolute h-full bg-brand-600/40 border-x border-brand-500/50"
           style={{ left: `${workLeft}%`, width: `${workWidth}%` }}
         />
-        {/* Lunch break bar */}
         {ls !== null && le !== null && (
           <div
             className="absolute h-full bg-warning-500/50 border-x border-warning-400/60"
             style={{ left: `${lunchLeft}%`, width: `${lunchWidth}%` }}
           />
         )}
-        {/* Hour markers */}
         {[0, 6, 12, 18, 24].map((h) => (
           <div
             key={h}
@@ -217,32 +213,37 @@ function ScheduleBar({
   );
 }
 
-// ============================================================
-// CREATE USER FORM
-// ============================================================
 function CreateUserForm({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+  const { sectors } = useSectors();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState<UserRole>('agent');
-  const [department, setDepartment] = useState<Department>('support');
+  const [sectorId, setSectorId] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const handleCreate = async () => {
     setLoading(true);
     setError(null);
-    const { data, error: fnError } = await supabase.functions.invoke('admin-create-user', {
-      body: { email, password, name, role, department },
-    });
-    if (fnError) {
-      setError(fnError.message);
-    } else if (data?.error) {
-      setError(data.error);
-    } else {
+    try {
+      await api('/users', {
+        method: 'POST',
+        body: JSON.stringify({
+          username: email,
+          email,
+          password,
+          name,
+          role: role === 'admin' ? 'ADMIN' : 'OPERATOR',
+          sectorId: sectorId || undefined,
+        }),
+      });
       onCreated();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Falha ao criar usuário');
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   return (
@@ -257,8 +258,8 @@ function CreateUserForm({ onClose, onCreated }: { onClose: () => void; onCreated
           <input value={name} onChange={(e) => setName(e.target.value)} className="input" placeholder="Nome completo" />
         </div>
         <div>
-          <label className="label">Email</label>
-          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="input" placeholder="email@exemplo.com" />
+          <label className="label">Email / Usuário</label>
+          <input type="text" value={email} onChange={(e) => setEmail(e.target.value)} className="input" placeholder="email@exemplo.com" />
         </div>
         <div>
           <label className="label">Senha</label>
@@ -273,10 +274,11 @@ function CreateUserForm({ onClose, onCreated }: { onClose: () => void; onCreated
         </div>
         <div>
           <label className="label">Setor</label>
-          <select value={department} onChange={(e) => setDepartment(e.target.value as Department)} className="input">
-            <option value="support">Suporte</option>
-            <option value="sales">Comercial</option>
-            <option value="admin">Administrador</option>
+          <select value={sectorId} onChange={(e) => setSectorId(e.target.value)} className="input">
+            <option value="">Sem setor</option>
+            {sectors.map((s) => (
+              <option key={s.id} value={s.id}>{s.name}</option>
+            ))}
           </select>
         </div>
       </div>
@@ -292,9 +294,6 @@ function CreateUserForm({ onClose, onCreated }: { onClose: () => void; onCreated
   );
 }
 
-// ============================================================
-// EDIT USER MODAL
-// ============================================================
 const TIME_OPTIONS: string[] = [];
 for (let h = 0; h < 24; h++) {
   for (const m of [0, 30]) {
@@ -303,15 +302,17 @@ for (let h = 0; h < 24; h++) {
 }
 
 function EditUserModal({ user, onClose, onSaved }: { user: Profile; onClose: () => void; onSaved: () => void }) {
+  const { sectors } = useSectors();
   const [name, setName] = useState(user.name);
   const [role, setRole] = useState(user.role);
-  const [department, setDepartment] = useState(user.department);
+  const [sectorId, setSectorId] = useState(user.sectorId || '');
   const [maxChats, setMaxChats] = useState(user.max_concurrent_chats);
   const [workStart, setWorkStart] = useState(user.work_start || '09:00');
   const [workEnd, setWorkEnd] = useState(user.work_end || '18:00');
   const [lunchStart, setLunchStart] = useState(user.lunch_start || '');
   const [lunchEnd, setLunchEnd] = useState(user.lunch_end || '');
   const [isActive, setIsActive] = useState(user.is_active);
+  const [avatarUrl, setAvatarUrl] = useState(user.avatar_url);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -334,24 +335,27 @@ function EditUserModal({ user, onClose, onSaved }: { user: Profile; onClose: () 
     }
 
     setSaving(true);
-    const { error: updateError } = await supabase.from('profiles').update({
-      name,
-      role,
-      department,
-      max_concurrent_chats: maxChats,
-      work_start: workStart,
-      work_end: workEnd,
-      lunch_start: lunchStart || null,
-      lunch_end: lunchEnd || null,
-      is_active: isActive,
-    }).eq('id', user.id);
-
-    setSaving(false);
-    if (updateError) {
-      setError(updateError.message);
-      return;
+    try {
+      await api(`/users/${user.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          name,
+          role: role === 'admin' ? 'ADMIN' : 'OPERATOR',
+          sectorId: sectorId || null,
+          limiteSimultaneo: maxChats,
+          workStart,
+          workEnd,
+          lunchStart: lunchStart || null,
+          lunchEnd: lunchEnd || null,
+          isActive,
+        }),
+      });
+      onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Falha ao salvar');
+    } finally {
+      setSaving(false);
     }
-    onSaved();
   };
 
   return (
@@ -359,15 +363,22 @@ function EditUserModal({ user, onClose, onSaved }: { user: Profile; onClose: () 
       <div className="card p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-5">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center text-sm font-bold text-white">
-              {user.name.charAt(0).toUpperCase()}
+            <AvatarUploadButton
+              profileId={user.id}
+              name={name}
+              avatarUrl={avatarUrl}
+              size="md"
+              rounded="lg"
+              onUploaded={(url) => setAvatarUrl(url)}
+            />
+            <div>
+              <h3 className="text-sm font-semibold text-white">Editar Usuário</h3>
+              <p className="text-[11px] text-ink-300">Clique na foto para alterar</p>
             </div>
-            <h3 className="text-sm font-semibold text-white">Editar Usuário</h3>
           </div>
           <button onClick={onClose} className="btn-ghost p-1"><X className="w-4 h-4" /></button>
         </div>
 
-        {/* Dados pessoais */}
         <div className="space-y-3 mb-5">
           <p className="text-xs font-semibold text-ink-200 uppercase tracking-wide">Dados Pessoais</p>
           <div className="grid grid-cols-2 gap-3">
@@ -382,7 +393,6 @@ function EditUserModal({ user, onClose, onSaved }: { user: Profile; onClose: () 
           </div>
         </div>
 
-        {/* Permissões */}
         <div className="space-y-3 mb-5">
           <p className="text-xs font-semibold text-ink-200 uppercase tracking-wide">Permissões</p>
           <div className="grid grid-cols-2 gap-3">
@@ -395,10 +405,11 @@ function EditUserModal({ user, onClose, onSaved }: { user: Profile; onClose: () 
             </div>
             <div>
               <label className="label">Setor</label>
-              <select value={department} onChange={(e) => setDepartment(e.target.value as Department)} className="input">
-                <option value="support">Suporte</option>
-                <option value="sales">Comercial</option>
-                <option value="admin">Administrador</option>
+              <select value={sectorId} onChange={(e) => setSectorId(e.target.value)} className="input">
+                <option value="">Sem setor</option>
+                {sectors.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
               </select>
             </div>
             <div>
@@ -415,14 +426,12 @@ function EditUserModal({ user, onClose, onSaved }: { user: Profile; onClose: () 
           </div>
         </div>
 
-        {/* Horário de Atendimento */}
         <div className="space-y-3 mb-5">
           <div className="flex items-center gap-2">
             <Clock className="w-4 h-4 text-brand-400" />
             <p className="text-xs font-semibold text-ink-200 uppercase tracking-wide">Horário de Atendimento</p>
           </div>
 
-          {/* Visual preview */}
           <div className="card p-3 bg-ink-800">
             <ScheduleBar
               workStart={workStart}
@@ -442,7 +451,6 @@ function EditUserModal({ user, onClose, onSaved }: { user: Profile; onClose: () 
             </div>
           </div>
 
-          {/* Work hours */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="label">Início do Expediente</label>
@@ -462,7 +470,6 @@ function EditUserModal({ user, onClose, onSaved }: { user: Profile; onClose: () 
             </div>
           </div>
 
-          {/* Lunch break */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="label">Início do Almoço</label>
@@ -484,7 +491,6 @@ function EditUserModal({ user, onClose, onSaved }: { user: Profile; onClose: () 
             </div>
           </div>
 
-          {/* Quick presets */}
           <div className="flex flex-wrap gap-2">
             <button
               onClick={() => { setWorkStart('08:00'); setWorkEnd('17:00'); setLunchStart('12:00'); setLunchEnd('13:00'); }}

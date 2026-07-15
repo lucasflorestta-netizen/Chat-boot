@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useCannedResponses } from '../../hooks/useData';
-import { supabase } from '../../lib/supabase';
+import { api } from '../../lib/api';
 import { Plus, Trash2, Zap, Loader2, X, Save } from 'lucide-react';
 import type { CannedResponse } from '../../types';
 
@@ -22,10 +22,17 @@ export function CannedView() {
 
   const handleSave = async () => {
     if (!shortcut.trim() || !title.trim() || !body.trim()) return;
+    const payload = { shortcut, title, content: body };
     if (editing) {
-      await supabase.from('canned_responses').update({ shortcut, title, body }).eq('id', editing.id);
+      await api(`/quick-messages/${editing.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(payload),
+      });
     } else {
-      await supabase.from('canned_responses').insert({ shortcut, title, body });
+      await api('/quick-messages', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
     }
     resetForm();
     refetch();
@@ -126,7 +133,7 @@ export function CannedView() {
               <button
                 onClick={async () => {
                   if (confirm(`Remover "${c.title}"?`)) {
-                    await supabase.from('canned_responses').delete().eq('id', c.id);
+                    await api(`/quick-messages/${c.id}`, { method: 'DELETE' });
                     refetch();
                   }
                 }}

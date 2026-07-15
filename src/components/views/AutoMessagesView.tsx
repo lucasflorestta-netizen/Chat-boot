@@ -1,52 +1,19 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useAutoMessageSettings } from '../../hooks/useData';
-import { supabase } from '../../lib/supabase';
+import { api } from '../../lib/api';
+import { mapAutoSettings } from '../../lib/mappers';
 import type { AutoMessageSettings } from '../../types';
 import { Save, Loader2, MessageSquare, Bot, UserCheck, CheckCircle, Star, Power, Check, AlertCircle } from 'lucide-react';
-
-const DEFAULT_SETTINGS: Omit<AutoMessageSettings, 'id' | 'updated_at'> = {
-  greeting_message: 'Olá! Bem-vindo ao nosso atendimento. Como podemos ajudar?',
-  bot_menu_active: true,
-  bot_menu_message: 'Digite o número do setor desejado:\n1 - Suporte\n2 - Vendas',
-  takeover_message: 'Conversa assumida pelo {{agente}}',
-  closing_message: 'Seu atendimento foi finalizado. Obrigado pelo contato!',
-  nps_question: 'Como você avalia nosso atendimento hoje? Digite de 1 a 5.',
-  nps_active: true,
-};
 
 export function AutoMessagesView() {
   const { settings, loading, refetch } = useAutoMessageSettings();
   const [form, setForm] = useState<AutoMessageSettings | null>(settings);
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
-  const [ensuring, setEnsuring] = useState(false);
-  const seedAttempted = useRef(false);
 
   useEffect(() => {
     setForm(settings);
   }, [settings]);
-
-  // Seed singleton row if missing so the form never spins forever
-  useEffect(() => {
-    if (loading || settings || seedAttempted.current) return;
-    seedAttempted.current = true;
-    let cancelled = false;
-    (async () => {
-      setEnsuring(true);
-      const { data, error } = await supabase
-        .from('auto_message_settings')
-        .insert(DEFAULT_SETTINGS)
-        .select('*')
-        .single();
-      if (!cancelled) {
-        if (error) console.error('Error seeding auto_message_settings:', error);
-        else if (data) setForm(data as AutoMessageSettings);
-        await refetch();
-        setEnsuring(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [loading, settings, refetch]);
 
   useEffect(() => {
     if (!feedback) return;
@@ -59,32 +26,19 @@ export function AutoMessagesView() {
     setSaving(true);
     setFeedback(null);
     try {
-      const payload = {
-        greeting_message: form.greeting_message,
-        bot_menu_active: form.bot_menu_active,
-        bot_menu_message: form.bot_menu_message,
-        takeover_message: 'Conversa assumida pelo {{agente}}',
-        closing_message: form.closing_message,
-        nps_question: form.nps_question,
-        nps_active: form.nps_active,
-      };
-
-      if (form.id) {
-        const { error } = await supabase
-          .from('auto_message_settings')
-          .update(payload)
-          .eq('id', form.id);
-        if (error) throw error;
-      } else {
-        const { data, error } = await supabase
-          .from('auto_message_settings')
-          .insert(payload)
-          .select('*')
-          .single();
-        if (error) throw error;
-        if (data) setForm(data as AutoMessageSettings);
-      }
-
+      const data = await api<any>('/auto-message-settings', {
+        method: 'PUT',
+        body: JSON.stringify({
+          greetingMessage: form.greeting_message,
+          botMenuActive: form.bot_menu_active,
+          botMenuMessage: form.bot_menu_message,
+          takeoverMessage: 'Conversa assumida pelo {{agente}}',
+          closingMessage: form.closing_message,
+          npsQuestion: form.nps_question,
+          npsActive: form.nps_active,
+        }),
+      });
+      if (data) setForm(mapAutoSettings(data));
       setFeedback({ type: 'success', message: 'Configurações salvas com sucesso.' });
       await refetch();
     } catch (err) {
@@ -95,7 +49,7 @@ export function AutoMessagesView() {
     }
   };
 
-  if (loading || ensuring || !form) {
+  if (loading || !form) {
     return (
       <div className="flex items-center justify-center h-96">
         <Loader2 className="w-8 h-8 animate-spin text-brand-500" />
@@ -133,7 +87,6 @@ export function AutoMessagesView() {
         </div>
       )}
 
-      {/* Bot menu toggle */}
       <div className="card p-5">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-3">
@@ -154,7 +107,6 @@ export function AutoMessagesView() {
         </div>
       </div>
 
-      {/* Greeting message */}
       <SettingCard
         icon={<MessageSquare className="w-5 h-5" />}
         title="Mensagem de Saudação (Boas-vindas)"
@@ -168,7 +120,6 @@ export function AutoMessagesView() {
         />
       </SettingCard>
 
-      {/* Bot menu message */}
       <SettingCard
         icon={<Bot className="w-5 h-5" />}
         title="Mensagem do Menu de Opções"
@@ -186,7 +137,6 @@ export function AutoMessagesView() {
         </p>
       </SettingCard>
 
-      {/* Takeover message — fixed text, not configurable */}
       <SettingCard
         icon={<UserCheck className="w-5 h-5" />}
         title="Mensagem de Assumir Atendimento"
@@ -197,7 +147,6 @@ export function AutoMessagesView() {
         </p>
       </SettingCard>
 
-      {/* Closing message */}
       <SettingCard
         icon={<CheckCircle className="w-5 h-5" />}
         title="Mensagem de Finalização"
@@ -211,7 +160,6 @@ export function AutoMessagesView() {
         />
       </SettingCard>
 
-      {/* NPS question */}
       <SettingCard
         icon={<Star className="w-5 h-5" />}
         title="Pesquisa de Satisfação (NPS)"

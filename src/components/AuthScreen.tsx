@@ -100,15 +100,15 @@ export function AuthScreen() {
               </div>
             )}
             <div>
-              <label className="label">Email</label>
+              <label className="label">Email ou usuário</label>
               <div className="relative">
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-ink-300" />
                 <input
-                  type="email"
+                  type="text"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="input pl-10"
-                  placeholder="seu@email.com"
+                  placeholder="seu@email.com ou usuário"
                   required
                 />
               </div>

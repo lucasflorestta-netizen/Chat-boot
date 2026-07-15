@@ -1,9 +1,5 @@
 import type { Message, MessageType } from '../../types';
 
-/** Shared select used for initial load and realtime enrichment. */
-export const MESSAGE_SELECT =
-  '*, sender:profiles!messages_sender_id_fkey(*), reply_to:messages!reply_to_message_id(*)';
-
 export function mediaLabel(mediaType: MessageType | string): string {
   switch (mediaType) {
     case 'image':

@@ -15,6 +15,7 @@ import {
   VolumeX,
 } from 'lucide-react';
 import { type ReactNode } from 'react';
+import { AvatarUploadButton } from '../AvatarUploadButton';
 
 export type TabId =
   | 'dashboard'
@@ -61,7 +62,7 @@ export function Sidebar({
   onToggleSound,
   notifications,
 }: SidebarProps) {
-  const { profile, signOut } = useAuth();
+  const { profile, signOut, refreshProfile, patchProfile } = useAuth();
   const items = navItems.filter((item) => !item.adminOnly || profile?.role === 'admin');
 
   return (
@@ -121,9 +122,22 @@ export function Sidebar({
         </div>
 
         <div className="flex items-center gap-3 p-2 rounded-lg bg-ink-800">
-          <div className="w-8 h-8 rounded-full bg-brand-600 flex items-center justify-center text-white text-sm font-semibold flex-shrink-0">
-            {profile?.name?.charAt(0).toUpperCase() ?? '?'}
-          </div>
+          {profile ? (
+            <AvatarUploadButton
+              profileId={profile.id}
+              name={profile.name}
+              avatarUrl={profile.avatar_url}
+              size="sm"
+              onUploaded={(url) => {
+                patchProfile({ avatar_url: url });
+                void refreshProfile();
+              }}
+            />
+          ) : (
+            <div className="w-8 h-8 rounded-full bg-brand-600 flex items-center justify-center text-white text-sm font-semibold flex-shrink-0">
+              ?
+            </div>
+          )}
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium text-white truncate">{profile?.name}</p>
             <p className="text-xs text-ink-300 capitalize">
