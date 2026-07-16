@@ -44,9 +44,18 @@ function previewClientMessage(message: {
   }
 }
 
+const AGENT_BLOCKED_TABS: TabId[] = [
+  'dashboard',
+  'whatsapp',
+  'tags',
+  'canned',
+  'users',
+  'auto-messages',
+];
+
 function AppContent() {
   const { session, profile, loading } = useAuth();
-  const [activeTab, setActiveTab] = useState<TabId>('dashboard');
+  const [activeTab, setActiveTab] = useState<TabId>('chat');
   const [preselectedTicket, setPreselectedTicket] = useState<string | null>(null);
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
   const selectedTicketIdRef = useRef<string | null>(null);
@@ -127,8 +136,8 @@ function AppContent() {
   }
 
   const guardedTab = (tab: TabId): TabId => {
-    if ((tab === 'users' || tab === 'auto-messages') && profile.role !== 'admin') {
-      return 'dashboard';
+    if (profile.role !== 'admin' && AGENT_BLOCKED_TABS.includes(tab)) {
+      return 'chat';
     }
     return tab;
   };
@@ -164,7 +173,9 @@ function AppContent() {
       />
 
       <main className="flex-1 overflow-hidden flex flex-col">
-        {activeTab === 'dashboard' && <Dashboard onNavigateToChat={() => setActiveTab('chat')} />}
+        {activeTab === 'dashboard' && profile.role === 'admin' && (
+          <Dashboard onNavigateToChat={() => setActiveTab('chat')} />
+        )}
         {activeTab === 'chat' && (
           <ChatView
             preselectedTicketId={preselectedTicket}
@@ -174,10 +185,10 @@ function AppContent() {
         )}
         {activeTab === 'contacts' && <ContactsView onStartConversation={handleStartConversation} />}
         {activeTab === 'users' && profile.role === 'admin' && <UsersView />}
-        {activeTab === 'whatsapp' && <WhatsappView />}
+        {activeTab === 'whatsapp' && profile.role === 'admin' && <WhatsappView />}
         {activeTab === 'auto-messages' && profile.role === 'admin' && <AutoMessagesView />}
-        {activeTab === 'tags' && <TagsView />}
-        {activeTab === 'canned' && <CannedView />}
+        {activeTab === 'tags' && profile.role === 'admin' && <TagsView />}
+        {activeTab === 'canned' && profile.role === 'admin' && <CannedView />}
       </main>
 
       <div className="fixed bottom-4 right-4 space-y-2 z-50">

@@ -35,14 +35,14 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-  { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard className="w-5 h-5" /> },
+  { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard className="w-5 h-5" />, adminOnly: true },
   { id: 'chat', label: 'Chat / Tickets', icon: <MessageSquare className="w-5 h-5" /> },
   { id: 'contacts', label: 'Contatos', icon: <Contact className="w-5 h-5" /> },
   { id: 'users', label: 'Usuários', icon: <Users className="w-5 h-5" />, adminOnly: true },
-  { id: 'whatsapp', label: 'Conexão WhatsApp', icon: <QrCode className="w-5 h-5" /> },
+  { id: 'whatsapp', label: 'Conexão WhatsApp', icon: <QrCode className="w-5 h-5" />, adminOnly: true },
   { id: 'auto-messages', label: 'Mensagens Automáticas', icon: <Settings className="w-5 h-5" />, adminOnly: true },
-  { id: 'tags', label: 'Etiquetas', icon: <Tag className="w-5 h-5" /> },
-  { id: 'canned', label: 'Respostas Rápidas', icon: <Zap className="w-5 h-5" /> },
+  { id: 'tags', label: 'Etiquetas', icon: <Tag className="w-5 h-5" />, adminOnly: true },
+  { id: 'canned', label: 'Respostas Rápidas', icon: <Zap className="w-5 h-5" />, adminOnly: true },
 ];
 
 interface SidebarProps {
