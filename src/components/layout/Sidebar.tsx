@@ -14,6 +14,7 @@ import {
   Bell,
   Volume2,
   VolumeX,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { type ReactNode } from 'react';
 import { AvatarUploadButton } from '../AvatarUploadButton';
@@ -25,6 +26,7 @@ export type TabId =
   | 'users'
   | 'whatsapp'
   | 'auto-messages'
+  | 'settings'
   | 'tags'
   | 'canned'
   | 'comunicador-interno';
@@ -43,6 +45,7 @@ const navItems: NavItem[] = [
   { id: 'users', label: 'Usuários', icon: <Users className="w-5 h-5" />, adminOnly: true },
   { id: 'whatsapp', label: 'Conexão WhatsApp', icon: <QrCode className="w-5 h-5" />, adminOnly: true },
   { id: 'auto-messages', label: 'Mensagens Automáticas', icon: <Settings className="w-5 h-5" />, adminOnly: true },
+  { id: 'settings', label: 'Configurações', icon: <SlidersHorizontal className="w-5 h-5" />, adminOnly: true },
   { id: 'tags', label: 'Etiquetas', icon: <Tag className="w-5 h-5" />, adminOnly: true },
   { id: 'canned', label: 'Respostas Rápidas', icon: <Zap className="w-5 h-5" />, adminOnly: true },
   { id: 'comunicador-interno', label: 'Comunicador Interno', icon: <MessageCircleMore className="w-5 h-5" /> },

@@ -126,6 +126,10 @@ export interface AutoMessageSettings {
   closing_message: string;
   nps_question: string;
   nps_active: boolean;
+  after_hours_message: string;
+  business_hours_enabled: boolean;
+  business_hours_start: string;
+  business_hours_end: string;
   updated_at: string;
 }
 

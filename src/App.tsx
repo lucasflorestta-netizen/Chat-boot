@@ -8,6 +8,7 @@ import { ContactsView } from './components/views/ContactsView';
 import { UsersView } from './components/views/UsersView';
 import { WhatsappView } from './components/views/WhatsappView';
 import { AutoMessagesView } from './components/views/AutoMessagesView';
+import { SettingsView } from './components/views/SettingsView';
 import { TagsView } from './components/views/TagsView';
 import { CannedView } from './components/views/CannedView';
 import { InternalChatView } from './components/views/InternalChatView';
@@ -66,6 +67,7 @@ const AGENT_BLOCKED_TABS: TabId[] = [
   'canned',
   'users',
   'auto-messages',
+  'settings',
 ];
 
 function AppContent() {
@@ -251,6 +253,7 @@ function AppContent() {
         {activeTab === 'users' && profile.role === 'admin' && <UsersView />}
         {activeTab === 'whatsapp' && profile.role === 'admin' && <WhatsappView />}
         {activeTab === 'auto-messages' && profile.role === 'admin' && <AutoMessagesView />}
+        {activeTab === 'settings' && profile.role === 'admin' && <SettingsView />}
         {activeTab === 'tags' && profile.role === 'admin' && <TagsView />}
         {activeTab === 'canned' && profile.role === 'admin' && <CannedView />}
         {activeTab === 'comunicador-interno' && <InternalChatView />}

@@ -3,7 +3,7 @@ import { useAutoMessageSettings } from '../../hooks/useData';
 import { api } from '../../lib/api';
 import { mapAutoSettings } from '../../lib/mappers';
 import type { AutoMessageSettings } from '../../types';
-import { Save, Loader2, MessageSquare, Bot, UserCheck, CheckCircle, Star, Power, Check, AlertCircle } from 'lucide-react';
+import { Save, Loader2, MessageSquare, Bot, UserCheck, CheckCircle, Star, Power, Check, AlertCircle, Moon } from 'lucide-react';
 
 export function AutoMessagesView() {
   const { settings, loading, refetch } = useAutoMessageSettings();
@@ -36,6 +36,7 @@ export function AutoMessagesView() {
           closingMessage: form.closing_message,
           npsQuestion: form.nps_question,
           npsActive: form.nps_active,
+          afterHoursMessage: form.after_hours_message,
         }),
       });
       if (data) setForm(mapAutoSettings(data));
@@ -169,6 +170,20 @@ export function AutoMessagesView() {
               onChange={(e) => setForm({ ...form, closing_message: e.target.value })}
               rows={3}
               className="input resize-none"
+            />
+          </SettingCard>
+
+          <SettingCard
+            icon={<Moon className="w-5 h-5" />}
+            title="Mensagem de Fim de Expediente"
+            description="Enviada automaticamente quando um cliente entra em contato fora do horário de atendimento. Configure o horário em Configurações."
+          >
+            <textarea
+              value={form.after_hours_message}
+              onChange={(e) => setForm({ ...form, after_hours_message: e.target.value })}
+              rows={3}
+              className="input resize-none"
+              placeholder="No momento estamos fora do horário de atendimento. Retornaremos assim que possível."
             />
           </SettingCard>
         </div>

@@ -249,6 +249,13 @@ export function mapAutoSettings(raw: any): AutoMessageSettings {
     closing_message: raw.closingMessage ?? raw.closing_message ?? '',
     nps_question: raw.npsQuestion ?? raw.nps_question ?? '',
     nps_active: raw.npsActive ?? raw.nps_active ?? true,
+    after_hours_message: raw.afterHoursMessage ?? raw.after_hours_message ?? '',
+    business_hours_enabled:
+      raw.businessHoursEnabled ?? raw.business_hours_enabled ?? false,
+    business_hours_start:
+      raw.businessHoursStart ?? raw.business_hours_start ?? '08:00',
+    business_hours_end:
+      raw.businessHoursEnd ?? raw.business_hours_end ?? '18:00',
     updated_at: iso(raw.updatedAt ?? raw.updated_at),
   };
 }
