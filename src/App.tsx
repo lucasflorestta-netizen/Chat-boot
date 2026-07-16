@@ -10,8 +10,10 @@ import { WhatsappView } from './components/views/WhatsappView';
 import { AutoMessagesView } from './components/views/AutoMessagesView';
 import { TagsView } from './components/views/TagsView';
 import { CannedView } from './components/views/CannedView';
+import { InternalChatView } from './components/views/InternalChatView';
 import { useNotifications } from './hooks/useNotifications';
 import { useTickets } from './hooks/useData';
+import { api } from './lib/api';
 import { connectSocket } from './lib/socket';
 import { mapMediaType } from './lib/mappers';
 import { Loader2, Bell } from 'lucide-react';
@@ -44,6 +46,19 @@ function previewClientMessage(message: {
   }
 }
 
+function previewInternalMessage(message: {
+  body?: string | null;
+  type?: string | null;
+}): string {
+  const body = (message.body ?? '').trim();
+  if (body) {
+    return body.length > TOAST_BODY_MAX ? `${body.slice(0, TOAST_BODY_MAX)}…` : body;
+  }
+  if (message.type === 'IMAGE') return 'Enviou uma imagem';
+  if (message.type === 'AUDIO') return 'Enviou um áudio';
+  return 'Nova mensagem interna';
+}
+
 const AGENT_BLOCKED_TABS: TabId[] = [
   'dashboard',
   'whatsapp',
@@ -58,16 +73,33 @@ function AppContent() {
   const [activeTab, setActiveTab] = useState<TabId>('chat');
   const [preselectedTicket, setPreselectedTicket] = useState<string | null>(null);
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
+  const [internalUnread, setInternalUnread] = useState(0);
   const selectedTicketIdRef = useRef<string | null>(null);
+  const activeTabRef = useRef<TabId>('chat');
   const { notifications, notify, soundEnabled, setSoundEnabled } = useNotifications();
   const { tickets } = useTickets();
   const ticketsRef = useRef(tickets);
   ticketsRef.current = tickets;
   selectedTicketIdRef.current = selectedTicketId;
+  activeTabRef.current = activeTab;
 
   const handleSelectedTicketChange = useCallback((ticketId: string | null) => {
     setSelectedTicketId(ticketId);
   }, []);
+
+  const refreshInternalUnread = useCallback(async () => {
+    try {
+      const data = await api<{ totalUnread: number }>('/internal-chat/conversations');
+      setInternalUnread(data.totalUnread ?? 0);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!profile) return;
+    void refreshInternalUnread();
+  }, [profile, refreshInternalUnread]);
 
   useEffect(() => {
     if (!profile) return;
@@ -95,18 +127,49 @@ function AppContent() {
 
       const tid = message.ticketId ?? ticket?.id;
       if (!tid) return;
-      if (activeTab === 'chat' && tid === selectedTicketIdRef.current) return;
+      if (activeTabRef.current === 'chat' && tid === selectedTicketIdRef.current) return;
 
       const listed = ticketsRef.current.find((t) => t.id === tid);
       const contactName = listed?.contact?.name?.trim() || 'Cliente';
       notify('message', contactName, previewClientMessage(message));
     };
 
+    const onInternal = (payload: {
+      message?: {
+        senderId?: string;
+        body?: string | null;
+        type?: string | null;
+        sender?: { name?: string | null; username?: string };
+      };
+    }) => {
+      const message = payload?.message;
+      if (!message) return;
+      if (message.senderId === profile.id) return;
+      if (activeTabRef.current === 'comunicador-interno') {
+        void refreshInternalUnread();
+        return;
+      }
+      const title =
+        message.sender?.name?.trim() ||
+        message.sender?.username ||
+        'Comunicador Interno';
+      notify('message', title, previewInternalMessage(message));
+      void refreshInternalUnread();
+    };
+
     socket.on('message.created', onMessage);
+    socket.on('internal.message.created', onInternal);
     return () => {
       socket.off('message.created', onMessage);
+      socket.off('internal.message.created', onInternal);
     };
-  }, [profile, notify, activeTab]);
+  }, [profile, notify, refreshInternalUnread]);
+
+  useEffect(() => {
+    if (activeTab === 'comunicador-interno') {
+      void refreshInternalUnread();
+    }
+  }, [activeTab, refreshInternalUnread]);
 
   const unreadCount = useMemo(() => {
     if (!profile) return 0;
@@ -167,6 +230,7 @@ function AppContent() {
         active={activeTab}
         onNavigate={handleNavigate}
         unreadCount={unreadCount}
+        internalUnreadCount={internalUnread}
         soundEnabled={soundEnabled}
         onToggleSound={() => setSoundEnabled(!soundEnabled)}
         notifications={notificationBell}
@@ -189,6 +253,7 @@ function AppContent() {
         {activeTab === 'auto-messages' && profile.role === 'admin' && <AutoMessagesView />}
         {activeTab === 'tags' && profile.role === 'admin' && <TagsView />}
         {activeTab === 'canned' && profile.role === 'admin' && <CannedView />}
+        {activeTab === 'comunicador-interno' && <InternalChatView />}
       </main>
 
       <div className="fixed bottom-4 right-4 space-y-2 z-50">

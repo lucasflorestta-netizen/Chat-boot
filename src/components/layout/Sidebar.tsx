@@ -8,6 +8,7 @@ import {
   Settings,
   Tag,
   Zap,
+  MessageCircleMore,
   LogOut,
   Headphones,
   Bell,
@@ -25,7 +26,8 @@ export type TabId =
   | 'whatsapp'
   | 'auto-messages'
   | 'tags'
-  | 'canned';
+  | 'canned'
+  | 'comunicador-interno';
 
 interface NavItem {
   id: TabId;
@@ -43,12 +45,14 @@ const navItems: NavItem[] = [
   { id: 'auto-messages', label: 'Mensagens Automáticas', icon: <Settings className="w-5 h-5" />, adminOnly: true },
   { id: 'tags', label: 'Etiquetas', icon: <Tag className="w-5 h-5" />, adminOnly: true },
   { id: 'canned', label: 'Respostas Rápidas', icon: <Zap className="w-5 h-5" />, adminOnly: true },
+  { id: 'comunicador-interno', label: 'Comunicador Interno', icon: <MessageCircleMore className="w-5 h-5" /> },
 ];
 
 interface SidebarProps {
   active: TabId;
   onNavigate: (tab: TabId) => void;
   unreadCount: number;
+  internalUnreadCount?: number;
   soundEnabled: boolean;
   onToggleSound: () => void;
   notifications: ReactNode;
@@ -58,6 +62,7 @@ export function Sidebar({
   active,
   onNavigate,
   unreadCount,
+  internalUnreadCount = 0,
   soundEnabled,
   onToggleSound,
   notifications,
@@ -97,6 +102,11 @@ export function Sidebar({
               {item.id === 'chat' && unreadCount > 0 && (
                 <span className="badge bg-danger-500 text-white px-1.5 min-w-[20px] justify-center">
                   {unreadCount}
+                </span>
+              )}
+              {item.id === 'comunicador-interno' && internalUnreadCount > 0 && (
+                <span className="badge bg-danger-500 text-white px-1.5 min-w-[20px] justify-center">
+                  {internalUnreadCount}
                 </span>
               )}
             </button>
