@@ -3,7 +3,7 @@ import { useAutoMessageSettings } from '../../hooks/useData';
 import { api } from '../../lib/api';
 import { mapAutoSettings } from '../../lib/mappers';
 import type { AutoMessageSettings } from '../../types';
-import { Save, Loader2, Clock, Check, AlertCircle, Power } from 'lucide-react';
+import { Save, Loader2, Clock, Check, AlertCircle, Power, UtensilsCrossed } from 'lucide-react';
 
 const TIME_OPTIONS: string[] = [];
 for (let h = 0; h < 24; h++) {
@@ -48,6 +48,7 @@ export function SettingsView() {
           businessHoursEnabled: form.business_hours_enabled,
           businessHoursStart: form.business_hours_start,
           businessHoursEnd: form.business_hours_end,
+          operatorLunchAutoStatus: form.operator_lunch_auto_status,
         }),
       });
       if (data) setForm(mapAutoSettings(data));
@@ -99,6 +100,53 @@ export function SettingsView() {
             {feedback.message}
           </div>
         )}
+
+        <div className="card p-5">
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div
+                className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+                  form.operator_lunch_auto_status ? 'bg-success-500/20' : 'bg-ink-700'
+                }`}
+              >
+                <UtensilsCrossed
+                  className={`w-5 h-5 ${
+                    form.operator_lunch_auto_status ? 'text-success-500' : 'text-ink-300'
+                  }`}
+                />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-white">
+                  Offline automático no almoço
+                </p>
+                <p className="text-xs text-ink-300">
+                  5 min antes do almoço o agente fica Offline (sem novos atendimentos) e
+                  volta a Disponível ao terminar. Atendimentos já atribuídos permanecem.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={form.operator_lunch_auto_status}
+              onClick={() =>
+                setForm({
+                  ...form,
+                  operator_lunch_auto_status: !form.operator_lunch_auto_status,
+                })
+              }
+              className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${
+                form.operator_lunch_auto_status ? 'bg-success-500' : 'bg-ink-600'
+              }`}
+            >
+              <span
+                className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
+                  form.operator_lunch_auto_status ? 'translate-x-5' : 'translate-x-0'
+                }`}
+              />
+            </button>
+          </div>
+        </div>
 
         <div className="card p-5">
           <div className="flex items-center justify-between gap-4">

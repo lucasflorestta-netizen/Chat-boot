@@ -2,6 +2,11 @@ import { useState } from 'react';
 import { useProfiles, useSectors } from '../../hooks/useData';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../lib/api';
+import {
+  agentStatusBadgeClass,
+  agentStatusLabel,
+  LUNCH_AUTO_OFFLINE_LEAD_MINUTES,
+} from '../../lib/agentStatus';
 import { departmentLabel } from '../../lib/mappers';
 import type { ApiUserRole, Profile } from '../../types';
 import { ContactAvatar } from '../ContactAvatar';
@@ -94,6 +99,9 @@ export function UsersView() {
                   <span className="badge bg-ink-700 text-ink-200 text-xs">
                     {departmentLabel(p.department)}
                   </span>
+                  <span className={`badge text-xs ${agentStatusBadgeClass(p.status)}`}>
+                    {agentStatusLabel(p.status)}
+                  </span>
                 </div>
               </div>
             </div>
@@ -126,9 +134,9 @@ export function UsersView() {
                 <span className="text-white font-medium">{p.max_concurrent_chats}</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-ink-300">Status</span>
+                <span className="text-ink-300">Conta</span>
                 <span className={`font-medium ${p.is_active ? 'text-success-500' : 'text-danger-400'}`}>
-                  {p.is_active ? 'Ativo' : 'Inativo'}
+                  {p.is_active ? 'Ativa' : 'Inativa'}
                 </span>
               </div>
             </div>
@@ -144,6 +152,11 @@ export function UsersView() {
               <p className="mt-3 text-[11px] text-ink-400">Configure o expediente na edição do usuário.</p>
             )}
 
+            {p.lunch_start && p.lunch_end && (
+              <p className="mt-2 text-[11px] text-ink-400">
+                Offline automático {LUNCH_AUTO_OFFLINE_LEAD_MINUTES} min antes do almoço; volta a Disponível ao terminar.
+              </p>
+            )}
             <div className="flex gap-2 mt-3">
               <button onClick={() => setEditing(p)} className="btn-secondary text-xs flex-1">
                 <Pencil className="w-3 h-3" />
@@ -212,6 +225,12 @@ function ScheduleBar({
   const workWidth = ((we - ws) / totalMin) * 100;
   const lunchLeft = ls !== null ? (ls / totalMin) * 100 : 0;
   const lunchWidth = ls !== null && le !== null ? ((le - ls) / totalMin) * 100 : 0;
+  const leadStart = ls !== null ? Math.max(0, ls - LUNCH_AUTO_OFFLINE_LEAD_MINUTES) : null;
+  const leadLeft = leadStart !== null ? (leadStart / totalMin) * 100 : 0;
+  const leadWidth =
+    leadStart !== null && ls !== null
+      ? ((ls - leadStart) / totalMin) * 100
+      : 0;
 
   return (
     <div className="mt-3">
@@ -220,6 +239,13 @@ function ScheduleBar({
           className="absolute h-full bg-brand-600/40 border-x border-brand-500/50"
           style={{ left: `${workLeft}%`, width: `${Math.max(workWidth, 0)}%` }}
         />
+        {leadStart !== null && ls !== null && leadWidth > 0 && (
+          <div
+            className="absolute h-full bg-danger-500/35 border-x border-danger-400/50"
+            style={{ left: `${leadLeft}%`, width: `${Math.max(leadWidth, 0)}%` }}
+            title={`Offline automático ${LUNCH_AUTO_OFFLINE_LEAD_MINUTES} min antes`}
+          />
+        )}
         {ls !== null && le !== null && (
           <div
             className="absolute h-full bg-warning-500/50 border-x border-warning-400/60"
@@ -558,10 +584,14 @@ function EditUserModal({ user, onClose, onSaved }: { user: Profile; onClose: () 
               lunchStart={lunchStart || null}
               lunchEnd={lunchEnd || null}
             />
-            <div className="flex items-center gap-4 mt-2 text-[10px]">
+            <div className="flex items-center gap-4 mt-2 text-[10px] flex-wrap">
               <span className="flex items-center gap-1.5">
                 <span className="w-2.5 h-2.5 rounded-sm bg-brand-600/60" />
                 <span className="text-ink-300">Expediente</span>
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-sm bg-danger-500/50" />
+                <span className="text-ink-300">Pré-almoço (offline)</span>
               </span>
               <span className="flex items-center gap-1.5">
                 <span className="w-2.5 h-2.5 rounded-sm bg-warning-500/60" />
@@ -609,6 +639,11 @@ function EditUserModal({ user, onClose, onSaved }: { user: Profile; onClose: () 
               </select>
             </div>
           </div>
+
+          <p className="text-[11px] text-ink-400">
+            Com almoço configurado, o agente fica Offline automaticamente {LUNCH_AUTO_OFFLINE_LEAD_MINUTES} min
+            antes do início e volta a Disponível ao terminar. Atendimentos já atribuídos permanecem com ele.
+          </p>
 
           <div className="flex flex-wrap gap-2">
             <button

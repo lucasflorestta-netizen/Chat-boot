@@ -1,5 +1,6 @@
 import { mediaUrl } from './api';
 import type {
+  AgentStatus,
   AppearanceSettings,
   AutoMessageSettings,
   CannedResponse,
@@ -105,6 +106,11 @@ export function toApiMediaType(mediaType: MessageType | string): string {
   return mediaType.toUpperCase();
 }
 
+export function mapAgentStatus(raw: unknown): AgentStatus {
+  if (raw === 'PAUSA' || raw === 'OFFLINE' || raw === 'DISPONIVEL') return raw;
+  return 'OFFLINE';
+}
+
 export function mapProfile(raw: any): Profile {
   const sectorName = raw?.sector?.name ?? null;
   return {
@@ -121,6 +127,7 @@ export function mapProfile(raw: any): Profile {
     work_end: raw.workEnd ?? raw.work_end ?? null,
     lunch_start: raw.lunchStart ?? raw.lunch_start ?? null,
     lunch_end: raw.lunchEnd ?? raw.lunch_end ?? null,
+    status: mapAgentStatus(raw.status),
     avatar_url: mediaUrl(raw.avatarUrl ?? raw.avatar_url),
     is_active: raw.isActive ?? raw.is_active ?? true,
     created_at: iso(raw.createdAt ?? raw.created_at),
@@ -274,6 +281,8 @@ export function mapAutoSettings(raw: any): AutoMessageSettings {
       raw.businessHoursStart ?? raw.business_hours_start ?? '08:00',
     business_hours_end:
       raw.businessHoursEnd ?? raw.business_hours_end ?? '18:00',
+    operator_lunch_auto_status:
+      raw.operatorLunchAutoStatus ?? raw.operator_lunch_auto_status ?? true,
     updated_at: iso(raw.updatedAt ?? raw.updated_at),
   };
 }

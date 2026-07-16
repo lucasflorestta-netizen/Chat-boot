@@ -17,7 +17,13 @@ import {
   VolumeX,
   SlidersHorizontal,
 } from 'lucide-react';
-import { type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
+import { api } from '../../lib/api';
+import {
+  AGENT_STATUS_OPTIONS,
+  agentStatusBadgeClass,
+} from '../../lib/agentStatus';
+import type { AgentStatus } from '../../types';
 import { AvatarUploadButton } from '../AvatarUploadButton';
 
 export type TabId =
@@ -75,6 +81,25 @@ export function Sidebar({
 }: SidebarProps) {
   const { profile, signOut, refreshProfile, patchProfile } = useAuth();
   const items = navItems.filter((item) => !item.adminOnly || profile?.role === 'admin');
+  const [statusSaving, setStatusSaving] = useState(false);
+
+  const updateStatus = async (status: AgentStatus) => {
+    if (!profile || status === profile.status || statusSaving) return;
+    const previous = profile.status;
+    patchProfile({ status });
+    setStatusSaving(true);
+    try {
+      await api('/users/me/status', {
+        method: 'PATCH',
+        body: JSON.stringify({ status }),
+      });
+    } catch (err) {
+      patchProfile({ status: previous });
+      alert(err instanceof Error ? err.message : 'Falha ao atualizar status');
+    } finally {
+      setStatusSaving(false);
+    }
+  };
 
   return (
     <aside className="w-64 bg-ink-900 border-r border-ink-700 flex flex-col h-screen sticky top-0">
@@ -164,6 +189,22 @@ export function Sidebar({
                   : 'Agente'}
               {profile?.department && ` · ${profile.department}`}
             </p>
+            {profile && (
+              <select
+                value={profile.status}
+                disabled={statusSaving}
+                onChange={(e) => void updateStatus(e.target.value as AgentStatus)}
+                className={`mt-1 w-full text-[11px] rounded-md border-0 py-1 pl-2 pr-6 cursor-pointer focus:ring-1 focus:ring-brand-500 ${agentStatusBadgeClass(profile.status)}`}
+                title="Status de atendimento"
+                aria-label="Status de atendimento"
+              >
+                {AGENT_STATUS_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
           <button onClick={signOut} className="text-ink-300 hover:text-danger-400 transition-colors" title="Sair">
             <LogOut className="w-4 h-4" />

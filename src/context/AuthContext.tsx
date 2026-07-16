@@ -77,6 +77,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     fetchMe().finally(() => setLoading(false));
   }, []);
 
+  // Keep own presence in sync when API cron (or admin) updates status
+  useEffect(() => {
+    if (!user?.id) return;
+    const socket = connectSocket();
+    const onUserUpdated = (payload: { user?: unknown }) => {
+      const raw = payload?.user;
+      if (!raw || typeof raw !== 'object') return;
+      const mapped = mapProfile(raw);
+      if (mapped.id !== user.id) return;
+      setProfile((prev) => (prev ? { ...prev, ...mapped } : mapped));
+    };
+    socket.on('user.updated', onUserUpdated);
+    return () => {
+      socket.off('user.updated', onUserUpdated);
+    };
+  }, [user?.id]);
+
   const signIn = async (usernameOrEmail: string, password: string) => {
     try {
       const data = await api<{ access_token: string; user: unknown }>('/auth/login', {

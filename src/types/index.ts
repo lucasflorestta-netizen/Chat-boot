@@ -8,6 +8,9 @@ export type Priority = 'low' | 'normal' | 'high' | 'urgent';
 /** Raw API role from Nest/Prisma (`ADMIN` | `OPERATOR` | `SUPERVISOR`). */
 export type ApiUserRole = 'ADMIN' | 'OPERATOR' | 'SUPERVISOR' | string;
 
+/** Presence / availability from Nest `UserStatus`. */
+export type AgentStatus = 'DISPONIVEL' | 'PAUSA' | 'OFFLINE';
+
 export interface Profile {
   id: string;
   name: string;
@@ -23,6 +26,8 @@ export interface Profile {
   work_end: string | null;
   lunch_start: string | null;
   lunch_end: string | null;
+  /** Availability for new tickets (DISPONIVEL / PAUSA / OFFLINE). */
+  status: AgentStatus;
   avatar_url: string | null;
   is_active: boolean;
   created_at: string;
@@ -157,6 +162,8 @@ export interface AutoMessageSettings {
   business_hours_enabled: boolean;
   business_hours_start: string;
   business_hours_end: string;
+  /** Offline automático 5 min antes do almoço / Disponível ao terminar. */
+  operator_lunch_auto_status: boolean;
   updated_at: string;
 }
 
