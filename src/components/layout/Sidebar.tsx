@@ -144,8 +144,8 @@ export function Sidebar({
               name={profile.name}
               avatarUrl={profile.avatar_url}
               size="sm"
-              onUploaded={(url) => {
-                patchProfile({ avatar_url: url });
+              onUploaded={({ displayUrl }) => {
+                patchProfile({ avatar_url: displayUrl });
                 void refreshProfile();
               }}
             />
@@ -157,7 +157,11 @@ export function Sidebar({
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium text-white truncate">{profile?.name}</p>
             <p className="text-xs text-ink-300 capitalize">
-              {profile?.role === 'admin' ? 'Administrador' : 'Agente'}
+              {profile?.apiRole === 'ADMIN'
+                ? 'Administrador'
+                : profile?.apiRole === 'SUPERVISOR'
+                  ? 'Supervisor'
+                  : 'Agente'}
               {profile?.department && ` · ${profile.department}`}
             </p>
           </div>

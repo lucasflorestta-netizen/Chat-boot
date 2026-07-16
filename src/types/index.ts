@@ -11,6 +11,7 @@ export type ApiUserRole = 'ADMIN' | 'OPERATOR' | 'SUPERVISOR' | string;
 export interface Profile {
   id: string;
   name: string;
+  username: string;
   email: string | null;
   role: UserRole;
   /** Unmapped API role — use for admin-only gates (e.g. wallpaper). */

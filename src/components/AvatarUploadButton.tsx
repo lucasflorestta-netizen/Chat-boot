@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Camera, Loader2 } from 'lucide-react';
 import { ContactAvatar } from './ContactAvatar';
-import { uploadAgentAvatar } from '../lib/uploadAvatar';
+import { uploadAgentAvatar, type AvatarUploadResult } from '../lib/uploadAvatar';
 
 interface AvatarUploadButtonProps {
   profileId: string;
@@ -10,7 +10,9 @@ interface AvatarUploadButtonProps {
   size?: 'sm' | 'md' | 'lg';
   rounded?: 'full' | 'lg' | '2xl';
   className?: string;
-  onUploaded: (url: string) => void;
+  /** When false, only uploads the file; parent must persist on save. Default true. */
+  persist?: boolean;
+  onUploaded: (result: AvatarUploadResult) => void;
 }
 
 export function AvatarUploadButton({
@@ -20,6 +22,7 @@ export function AvatarUploadButton({
   size = 'md',
   rounded = 'full',
   className = '',
+  persist = true,
   onUploaded,
 }: AvatarUploadButtonProps) {
   const [uploading, setUploading] = useState(false);
@@ -37,9 +40,9 @@ export function AvatarUploadButton({
     setUploading(true);
     setError(null);
     try {
-      const url = await uploadAgentAvatar(profileId, file);
-      setPreviewUrl(url);
-      onUploaded(url);
+      const result = await uploadAgentAvatar(profileId, file, { persist });
+      setPreviewUrl(result.displayUrl);
+      onUploaded(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Falha ao enviar foto');
     } finally {

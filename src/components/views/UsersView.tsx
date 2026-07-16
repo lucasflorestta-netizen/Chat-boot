@@ -3,10 +3,26 @@ import { useProfiles, useSectors } from '../../hooks/useData';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../lib/api';
 import { departmentLabel } from '../../lib/mappers';
-import type { Profile, UserRole } from '../../types';
+import type { ApiUserRole, Profile } from '../../types';
 import { ContactAvatar } from '../ContactAvatar';
 import { AvatarUploadButton } from '../AvatarUploadButton';
 import { UserPlus, Trash2, Shield, Loader2, Save, X, Clock, Pencil, Calendar } from 'lucide-react';
+
+function roleLabel(apiRole: string): string {
+  if (apiRole === 'ADMIN') return 'Administrador';
+  if (apiRole === 'SUPERVISOR') return 'Supervisor';
+  return 'Agente';
+}
+
+function toApiRole(value: string): ApiUserRole {
+  if (value === 'ADMIN' || value === 'SUPERVISOR') return value;
+  return 'OPERATOR';
+}
+
+function normalizeApiRole(value: string | undefined | null): ApiUserRole {
+  if (value === 'ADMIN' || value === 'SUPERVISOR' || value === 'OPERATOR') return value;
+  return 'OPERATOR';
+}
 
 export function UsersView() {
   const { profiles, loading, refetch } = useProfiles();
@@ -55,15 +71,25 @@ export function UsersView() {
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
                   <p className="text-sm font-semibold text-white truncate">{p.name}</p>
-                  {p.role === 'admin' && <Shield className="w-3.5 h-3.5 text-warning-400 flex-shrink-0" />}
+                  {(p.apiRole === 'ADMIN' || p.apiRole === 'SUPERVISOR') && (
+                    <Shield className="w-3.5 h-3.5 text-warning-400 flex-shrink-0" />
+                  )}
                   {p.id === currentUser?.id && (
                     <span className="badge bg-brand-500/20 text-brand-300 text-[10px]">Você</span>
                   )}
                 </div>
-                <p className="text-xs text-ink-300 truncate">{p.email}</p>
+                <p className="text-xs text-ink-300 truncate">
+                  @{p.username}{p.email ? ` · ${p.email}` : ''}
+                </p>
                 <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
-                  <span className={`badge text-xs ${p.role === 'admin' ? 'bg-warning-500/20 text-warning-400' : 'bg-brand-500/20 text-brand-300'}`}>
-                    {p.role === 'admin' ? 'Administrador' : 'Agente'}
+                  <span className={`badge text-xs ${
+                    p.apiRole === 'ADMIN'
+                      ? 'bg-warning-500/20 text-warning-400'
+                      : p.apiRole === 'SUPERVISOR'
+                        ? 'bg-purple-500/20 text-purple-300'
+                        : 'bg-brand-500/20 text-brand-300'
+                  }`}>
+                    {roleLabel(p.apiRole)}
                   </span>
                   <span className="badge bg-ink-700 text-ink-200 text-xs">
                     {departmentLabel(p.department)}
@@ -78,8 +104,10 @@ export function UsersView() {
                   <Clock className="w-3 h-3" />
                   Expediente
                 </span>
-                <span className="text-white font-medium">
-                  {p.work_start?.slice(0, 5)} - {p.work_end?.slice(0, 5)}
+                <span className={`font-medium ${p.work_start && p.work_end ? 'text-white' : 'text-ink-300'}`}>
+                  {p.work_start && p.work_end
+                    ? `${p.work_start.slice(0, 5)} - ${p.work_end.slice(0, 5)}`
+                    : 'Não configurado'}
                 </span>
               </div>
               <div className="flex items-center justify-between">
@@ -105,12 +133,16 @@ export function UsersView() {
               </div>
             </div>
 
-            <ScheduleBar
-              workStart={p.work_start || '09:00'}
-              workEnd={p.work_end || '18:00'}
-              lunchStart={p.lunch_start}
-              lunchEnd={p.lunch_end}
-            />
+            {p.work_start && p.work_end ? (
+              <ScheduleBar
+                workStart={p.work_start}
+                workEnd={p.work_end}
+                lunchStart={p.lunch_start}
+                lunchEnd={p.lunch_end}
+              />
+            ) : (
+              <p className="mt-3 text-[11px] text-ink-400">Configure o expediente na edição do usuário.</p>
+            )}
 
             <div className="flex gap-2 mt-3">
               <button onClick={() => setEditing(p)} className="btn-secondary text-xs flex-1">
@@ -186,12 +218,12 @@ function ScheduleBar({
       <div className="relative h-5 bg-ink-800 rounded-md overflow-hidden">
         <div
           className="absolute h-full bg-brand-600/40 border-x border-brand-500/50"
-          style={{ left: `${workLeft}%`, width: `${workWidth}%` }}
+          style={{ left: `${workLeft}%`, width: `${Math.max(workWidth, 0)}%` }}
         />
         {ls !== null && le !== null && (
           <div
             className="absolute h-full bg-warning-500/50 border-x border-warning-400/60"
-            style={{ left: `${lunchLeft}%`, width: `${lunchWidth}%` }}
+            style={{ left: `${lunchLeft}%`, width: `${Math.max(lunchWidth, 0)}%` }}
           />
         )}
         {[0, 6, 12, 18, 24].map((h) => (
@@ -216,9 +248,10 @@ function ScheduleBar({
 function CreateUserForm({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
   const { sectors } = useSectors();
   const [name, setName] = useState('');
+  const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [role, setRole] = useState<UserRole>('agent');
+  const [role, setRole] = useState<ApiUserRole>('OPERATOR');
   const [sectorId, setSectorId] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -227,14 +260,15 @@ function CreateUserForm({ onClose, onCreated }: { onClose: () => void; onCreated
     setLoading(true);
     setError(null);
     try {
+      const trimmedEmail = email.trim();
       await api('/users', {
         method: 'POST',
         body: JSON.stringify({
-          username: email,
-          email,
+          username: username.trim(),
+          ...(trimmedEmail ? { email: trimmedEmail } : {}),
           password,
-          name,
-          role: role === 'admin' ? 'ADMIN' : 'OPERATOR',
+          name: name.trim(),
+          role: toApiRole(role),
           sectorId: sectorId || undefined,
         }),
       });
@@ -258,8 +292,12 @@ function CreateUserForm({ onClose, onCreated }: { onClose: () => void; onCreated
           <input value={name} onChange={(e) => setName(e.target.value)} className="input" placeholder="Nome completo" />
         </div>
         <div>
-          <label className="label">Email / Usuário</label>
-          <input type="text" value={email} onChange={(e) => setEmail(e.target.value)} className="input" placeholder="email@exemplo.com" />
+          <label className="label">Usuário (login)</label>
+          <input value={username} onChange={(e) => setUsername(e.target.value)} className="input" placeholder="ex: joao.silva" />
+        </div>
+        <div>
+          <label className="label">E-mail (opcional)</label>
+          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="input" placeholder="email@exemplo.com" />
         </div>
         <div>
           <label className="label">Senha</label>
@@ -267,9 +305,10 @@ function CreateUserForm({ onClose, onCreated }: { onClose: () => void; onCreated
         </div>
         <div>
           <label className="label">Nível de Acesso</label>
-          <select value={role} onChange={(e) => setRole(e.target.value as UserRole)} className="input">
-            <option value="agent">Agente</option>
-            <option value="admin">Administrador</option>
+          <select value={role} onChange={(e) => setRole(toApiRole(e.target.value))} className="input">
+            <option value="OPERATOR">Agente</option>
+            <option value="SUPERVISOR">Supervisor</option>
+            <option value="ADMIN">Administrador</option>
           </select>
         </div>
         <div>
@@ -284,7 +323,11 @@ function CreateUserForm({ onClose, onCreated }: { onClose: () => void; onCreated
       </div>
       {error && <p className="text-sm text-danger-400 mt-2">{error}</p>}
       <div className="flex gap-2 mt-4">
-        <button onClick={handleCreate} disabled={loading || !name || !email || !password} className="btn-primary">
+        <button
+          onClick={handleCreate}
+          disabled={loading || !name.trim() || !username.trim() || password.length < 6}
+          className="btn-primary"
+        >
           {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
           Criar
         </button>
@@ -304,8 +347,10 @@ for (let h = 0; h < 24; h++) {
 function EditUserModal({ user, onClose, onSaved }: { user: Profile; onClose: () => void; onSaved: () => void }) {
   const { sectors } = useSectors();
   const [name, setName] = useState(user.name);
+  const [username, setUsername] = useState(user.username);
+  const [email, setEmail] = useState(user.email || '');
   const [password, setPassword] = useState('');
-  const [role, setRole] = useState(user.role);
+  const [role, setRole] = useState<ApiUserRole>(normalizeApiRole(user.apiRole));
   const [sectorId, setSectorId] = useState(user.sectorId || '');
   const [maxChats, setMaxChats] = useState(user.max_concurrent_chats);
   const [workStart, setWorkStart] = useState(user.work_start || '09:00');
@@ -314,16 +359,37 @@ function EditUserModal({ user, onClose, onSaved }: { user: Profile; onClose: () 
   const [lunchEnd, setLunchEnd] = useState(user.lunch_end || '');
   const [isActive, setIsActive] = useState(user.is_active);
   const [avatarUrl, setAvatarUrl] = useState(user.avatar_url);
+  const [pendingAvatarRelative, setPendingAvatarRelative] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const handleLunchStartChange = (value: string) => {
+    setLunchStart(value);
+    if (!value) setLunchEnd('');
+  };
 
   const handleSave = async () => {
     setError(null);
 
+    const trimmedName = name.trim();
+    const trimmedUsername = username.trim();
+    const trimmedEmail = email.trim();
     const trimmedPassword = password.trim();
 
+    if (trimmedName.length < 2) {
+      setError('O nome deve ter pelo menos 2 caracteres.');
+      return;
+    }
+    if (trimmedUsername.length < 2) {
+      setError('O usuário (login) deve ter pelo menos 2 caracteres.');
+      return;
+    }
     if (trimmedPassword && trimmedPassword.length < 6) {
       setError('A nova senha deve ter pelo menos 6 caracteres.');
+      return;
+    }
+    if (maxChats < 1 || maxChats > 50) {
+      setError('O limite de conversas deve ser entre 1 e 50.');
       return;
     }
 
@@ -331,7 +397,11 @@ function EditUserModal({ user, onClose, onSaved }: { user: Profile; onClose: () 
       setError('O fim do expediente deve ser depois do início.');
       return;
     }
-    if (lunchStart && lunchEnd) {
+    if (lunchStart || lunchEnd) {
+      if (!lunchStart || !lunchEnd) {
+        setError('Informe início e fim do almoço, ou deixe ambos vazios.');
+        return;
+      }
       if (lunchEnd <= lunchStart) {
         setError('O fim do almoço deve ser depois do início.');
         return;
@@ -344,19 +414,23 @@ function EditUserModal({ user, onClose, onSaved }: { user: Profile; onClose: () 
 
     setSaving(true);
     try {
+      const hasLunch = Boolean(lunchStart && lunchEnd);
       await api(`/users/${user.id}`, {
         method: 'PATCH',
         body: JSON.stringify({
-          name,
+          name: trimmedName,
+          username: trimmedUsername,
+          email: trimmedEmail || null,
           ...(trimmedPassword ? { password: trimmedPassword } : {}),
-          role: role === 'admin' ? 'ADMIN' : 'OPERATOR',
+          role: toApiRole(role),
           sectorId: sectorId || null,
           limiteSimultaneo: maxChats,
           workStart,
           workEnd,
-          lunchStart: lunchStart || null,
-          lunchEnd: lunchEnd || null,
+          lunchStart: hasLunch ? lunchStart : null,
+          lunchEnd: hasLunch ? lunchEnd : null,
           isActive,
+          ...(pendingAvatarRelative ? { avatarUrl: pendingAvatarRelative } : {}),
         }),
       });
       onSaved();
@@ -378,11 +452,15 @@ function EditUserModal({ user, onClose, onSaved }: { user: Profile; onClose: () 
               avatarUrl={avatarUrl}
               size="md"
               rounded="lg"
-              onUploaded={(url) => setAvatarUrl(url)}
+              persist={false}
+              onUploaded={({ relativeUrl, displayUrl }) => {
+                setAvatarUrl(displayUrl);
+                setPendingAvatarRelative(relativeUrl);
+              }}
             />
             <div>
               <h3 className="text-sm font-semibold text-white">Editar Usuário</h3>
-              <p className="text-[11px] text-ink-300">Clique na foto para alterar</p>
+              <p className="text-[11px] text-ink-300">Foto só é salva ao clicar em Salvar</p>
             </div>
           </div>
           <button onClick={onClose} className="btn-ghost p-1"><X className="w-4 h-4" /></button>
@@ -396,8 +474,18 @@ function EditUserModal({ user, onClose, onSaved }: { user: Profile; onClose: () 
               <input value={name} onChange={(e) => setName(e.target.value)} className="input" />
             </div>
             <div>
-              <label className="label">Email</label>
-              <input value={user.email || ''} disabled className="input opacity-60" />
+              <label className="label">Usuário (login)</label>
+              <input value={username} onChange={(e) => setUsername(e.target.value)} className="input" />
+            </div>
+            <div className="col-span-2">
+              <label className="label">E-mail</label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="input"
+                placeholder="Opcional"
+              />
             </div>
             <div className="col-span-2">
               <label className="label">Nova Senha</label>
@@ -410,7 +498,7 @@ function EditUserModal({ user, onClose, onSaved }: { user: Profile; onClose: () 
                 autoComplete="new-password"
               />
               <p className="mt-1 text-[11px] text-ink-300">
-                Preencha apenas se quiser alterar a senha. Minimo de 6 caracteres.
+                Preencha apenas se quiser alterar a senha. Mínimo de 6 caracteres.
               </p>
             </div>
           </div>
@@ -421,9 +509,10 @@ function EditUserModal({ user, onClose, onSaved }: { user: Profile; onClose: () 
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="label">Nível de Acesso</label>
-              <select value={role} onChange={(e) => setRole(e.target.value as UserRole)} className="input">
-                <option value="agent">Agente</option>
-                <option value="admin">Administrador</option>
+              <select value={role} onChange={(e) => setRole(toApiRole(e.target.value))} className="input">
+                <option value="OPERATOR">Agente</option>
+                <option value="SUPERVISOR">Supervisor</option>
+                <option value="ADMIN">Administrador</option>
               </select>
             </div>
             <div>
@@ -437,7 +526,14 @@ function EditUserModal({ user, onClose, onSaved }: { user: Profile; onClose: () 
             </div>
             <div>
               <label className="label">Máx. Conversas Simultâneas</label>
-              <input type="number" value={maxChats} onChange={(e) => setMaxChats(parseInt(e.target.value) || 0)} className="input" min={1} max={50} />
+              <input
+                type="number"
+                value={maxChats}
+                onChange={(e) => setMaxChats(Math.min(50, Math.max(1, parseInt(e.target.value, 10) || 1)))}
+                className="input"
+                min={1}
+                max={50}
+              />
             </div>
             <div>
               <label className="label">Status</label>
@@ -496,7 +592,7 @@ function EditUserModal({ user, onClose, onSaved }: { user: Profile; onClose: () 
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="label">Início do Almoço</label>
-              <select value={lunchStart} onChange={(e) => setLunchStart(e.target.value)} className="input">
+              <select value={lunchStart} onChange={(e) => handleLunchStartChange(e.target.value)} className="input">
                 <option value="">Sem almoço</option>
                 {TIME_OPTIONS.map((t) => (
                   <option key={t} value={t}>{t}</option>
@@ -516,18 +612,21 @@ function EditUserModal({ user, onClose, onSaved }: { user: Profile; onClose: () 
 
           <div className="flex flex-wrap gap-2">
             <button
+              type="button"
               onClick={() => { setWorkStart('08:00'); setWorkEnd('17:00'); setLunchStart('12:00'); setLunchEnd('13:00'); }}
               className="text-xs px-2.5 py-1 rounded-md bg-ink-700 text-ink-200 hover:bg-ink-600 hover:text-white transition-colors"
             >
               08h-17h (Almoço 12h-13h)
             </button>
             <button
+              type="button"
               onClick={() => { setWorkStart('09:00'); setWorkEnd('18:00'); setLunchStart('12:00'); setLunchEnd('13:00'); }}
               className="text-xs px-2.5 py-1 rounded-md bg-ink-700 text-ink-200 hover:bg-ink-600 hover:text-white transition-colors"
             >
               09h-18h (Almoço 12h-13h)
             </button>
             <button
+              type="button"
               onClick={() => { setWorkStart('14:00'); setWorkEnd('23:00'); setLunchStart(''); setLunchEnd(''); }}
               className="text-xs px-2.5 py-1 rounded-md bg-ink-700 text-ink-200 hover:bg-ink-600 hover:text-white transition-colors"
             >
