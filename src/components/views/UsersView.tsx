@@ -304,6 +304,7 @@ for (let h = 0; h < 24; h++) {
 function EditUserModal({ user, onClose, onSaved }: { user: Profile; onClose: () => void; onSaved: () => void }) {
   const { sectors } = useSectors();
   const [name, setName] = useState(user.name);
+  const [password, setPassword] = useState('');
   const [role, setRole] = useState(user.role);
   const [sectorId, setSectorId] = useState(user.sectorId || '');
   const [maxChats, setMaxChats] = useState(user.max_concurrent_chats);
@@ -318,6 +319,13 @@ function EditUserModal({ user, onClose, onSaved }: { user: Profile; onClose: () 
 
   const handleSave = async () => {
     setError(null);
+
+    const trimmedPassword = password.trim();
+
+    if (trimmedPassword && trimmedPassword.length < 6) {
+      setError('A nova senha deve ter pelo menos 6 caracteres.');
+      return;
+    }
 
     if (workEnd <= workStart) {
       setError('O fim do expediente deve ser depois do início.');
@@ -340,6 +348,7 @@ function EditUserModal({ user, onClose, onSaved }: { user: Profile; onClose: () 
         method: 'PATCH',
         body: JSON.stringify({
           name,
+          ...(trimmedPassword ? { password: trimmedPassword } : {}),
           role: role === 'admin' ? 'ADMIN' : 'OPERATOR',
           sectorId: sectorId || null,
           limiteSimultaneo: maxChats,
@@ -389,6 +398,20 @@ function EditUserModal({ user, onClose, onSaved }: { user: Profile; onClose: () 
             <div>
               <label className="label">Email</label>
               <input value={user.email || ''} disabled className="input opacity-60" />
+            </div>
+            <div className="col-span-2">
+              <label className="label">Nova Senha</label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="input"
+                placeholder="Deixe em branco para manter a senha atual"
+                autoComplete="new-password"
+              />
+              <p className="mt-1 text-[11px] text-ink-300">
+                Preencha apenas se quiser alterar a senha. Minimo de 6 caracteres.
+              </p>
             </div>
           </div>
         </div>
