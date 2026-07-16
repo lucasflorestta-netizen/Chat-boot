@@ -63,6 +63,32 @@ export function useTickets(_filter?: { status?: string; department?: string; ass
       if (!payload?.ticket) return;
       setTickets((prev) => upsertById(prev, mapTicket(payload.ticket)));
     };
+    const onMessage = (payload: { ticket?: any; message?: any }) => {
+      const rawTicket = payload?.ticket;
+      const ticketId = rawTicket?.id ?? payload?.message?.ticketId;
+      if (!ticketId) return;
+
+      setTickets((prev) => {
+        const idx = prev.findIndex((t) => t.id === ticketId);
+        if (idx === -1) {
+          if (!rawTicket) return prev;
+          return upsertById(prev, mapTicket(rawTicket));
+        }
+
+        const existing = prev[idx];
+        const mapped = rawTicket ? mapTicket(rawTicket) : existing;
+        const merged = {
+          ...existing,
+          ...mapped,
+          contact: existing.contact ?? mapped.contact,
+          assigned_agent: existing.assigned_agent ?? mapped.assigned_agent,
+          tags: existing.tags?.length ? existing.tags : mapped.tags,
+        };
+        const next = [...prev];
+        next.splice(idx, 1);
+        return [merged, ...next];
+      });
+    };
     const onContact = () => {
       void fetchTickets();
     };
@@ -70,6 +96,8 @@ export function useTickets(_filter?: { status?: string; department?: string; ass
     socket.on('ticket.created', onCreated);
     socket.on('ticket.updated', onUpdated);
     socket.on('ticket_updated', onUpdated);
+    socket.on('message.created', onMessage);
+    socket.on('new_message', onMessage);
     socket.on('contact.updated', onContact);
     socket.on('user.updated', onContact);
 
@@ -77,6 +105,8 @@ export function useTickets(_filter?: { status?: string; department?: string; ass
       socket.off('ticket.created', onCreated);
       socket.off('ticket.updated', onUpdated);
       socket.off('ticket_updated', onUpdated);
+      socket.off('message.created', onMessage);
+      socket.off('new_message', onMessage);
       socket.off('contact.updated', onContact);
       socket.off('user.updated', onContact);
     };
@@ -147,8 +177,23 @@ export function useMessages(ticketId: string | null) {
 
   const replaceOptimistic = useCallback((tempId: string, message: Message) => {
     setMessages((prev) => {
-      const withoutDup = prev.filter((m) => m.id !== message.id);
-      return withoutDup.map((m) => (m.id === tempId ? { ...message, _localStatus: undefined } : m));
+      const hasTemp = prev.some((m) => m.id === tempId);
+      const hasReal = prev.some((m) => m.id === message.id);
+
+      // WS already applied the real message — keep/update it and drop any leftover temp
+      if (hasReal) {
+        return prev
+          .filter((m) => m.id !== tempId)
+          .map((m) => (m.id === message.id ? { ...message, _localStatus: undefined } : m));
+      }
+
+      // HTTP arrived first — swap temp for the real message
+      if (hasTemp) {
+        return prev.map((m) => (m.id === tempId ? { ...message, _localStatus: undefined } : m));
+      }
+
+      // Neither present (edge case) — append
+      return [...prev, { ...message, _localStatus: undefined }];
     });
   }, []);
 
