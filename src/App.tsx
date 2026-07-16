@@ -16,7 +16,9 @@ import { useNotifications } from './hooks/useNotifications';
 import { useTickets } from './hooks/useData';
 import { api } from './lib/api';
 import { connectSocket } from './lib/socket';
-import { mapMediaType } from './lib/mappers';
+import { mapMediaType, mapTicket } from './lib/mappers';
+import { TransferAcceptModal } from './components/chat/TransferAcceptModal';
+import type { Ticket } from './types';
 import { Loader2, Bell } from 'lucide-react';
 
 const TOAST_BODY_MAX = 120;
@@ -76,6 +78,8 @@ function AppContent() {
   const [preselectedTicket, setPreselectedTicket] = useState<string | null>(null);
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
   const [internalUnread, setInternalUnread] = useState(0);
+  const [pendingTransfer, setPendingTransfer] = useState<Ticket | null>(null);
+  const [transferBusy, setTransferBusy] = useState(false);
   const selectedTicketIdRef = useRef<string | null>(null);
   const activeTabRef = useRef<TabId>('chat');
   const { notifications, notify, soundEnabled, setSoundEnabled } = useNotifications();
@@ -102,6 +106,90 @@ function AppContent() {
     if (!profile) return;
     void refreshInternalUnread();
   }, [profile, refreshInternalUnread]);
+
+  useEffect(() => {
+    if (!profile) return;
+    const forMe = tickets.find(
+      (t) => t.pending_transfer_to === profile.id && t.status !== 'finished',
+    );
+    setPendingTransfer((prev) => {
+      if (forMe) return forMe;
+      if (prev && prev.pending_transfer_to === profile.id) return null;
+      return prev;
+    });
+  }, [tickets, profile]);
+
+  useEffect(() => {
+    if (!profile) return;
+    const socket = connectSocket();
+
+    const onTransferRequested = (payload: { ticket?: any }) => {
+      if (!payload?.ticket) return;
+      const ticket = mapTicket(payload.ticket);
+      if (ticket.pending_transfer_to !== profile.id) return;
+      setPendingTransfer(ticket);
+      const fromName =
+        ticket.pending_transfer_from_agent?.name?.trim() || 'Um agente';
+      const contactName = ticket.contact?.name?.trim() || 'Cliente';
+      notify(
+        'ticket',
+        'Transferência recebida',
+        `${fromName} quer transferir ${contactName} para você`,
+      );
+    };
+
+    const onTransferResolved = (payload: { ticket?: any }) => {
+      if (!payload?.ticket) return;
+      const ticket = mapTicket(payload.ticket);
+      setPendingTransfer((prev) =>
+        prev && prev.id === ticket.id ? null : prev,
+      );
+    };
+
+    socket.on('ticket.transfer.requested', onTransferRequested);
+    socket.on('ticket.transfer.accepted', onTransferResolved);
+    socket.on('ticket.transfer.rejected', onTransferResolved);
+    socket.on('ticket.transfer.cancelled', onTransferResolved);
+    return () => {
+      socket.off('ticket.transfer.requested', onTransferRequested);
+      socket.off('ticket.transfer.accepted', onTransferResolved);
+      socket.off('ticket.transfer.rejected', onTransferResolved);
+      socket.off('ticket.transfer.cancelled', onTransferResolved);
+    };
+  }, [profile, notify]);
+
+  const handleAcceptTransfer = async () => {
+    if (!pendingTransfer) return;
+    setTransferBusy(true);
+    try {
+      await api(`/tickets/${pendingTransfer.id}/transfer/accept`, {
+        method: 'PATCH',
+        body: JSON.stringify({}),
+      });
+      setPendingTransfer(null);
+      setPreselectedTicket(pendingTransfer.id);
+      setActiveTab('chat');
+    } catch (err) {
+      console.error('Erro ao aceitar transferência:', err);
+    } finally {
+      setTransferBusy(false);
+    }
+  };
+
+  const handleRejectTransfer = async () => {
+    if (!pendingTransfer) return;
+    setTransferBusy(true);
+    try {
+      await api(`/tickets/${pendingTransfer.id}/transfer/reject`, {
+        method: 'PATCH',
+      });
+      setPendingTransfer(null);
+    } catch (err) {
+      console.error('Erro ao recusar transferência:', err);
+    } finally {
+      setTransferBusy(false);
+    }
+  };
 
   useEffect(() => {
     if (!profile) return;
@@ -181,7 +269,8 @@ function AppContent() {
           (t) =>
             t.status === 'triage' ||
             (profile.sectorId != null && t.sectorId === profile.sectorId) ||
-            t.assigned_to === profile.id,
+            t.assigned_to === profile.id ||
+            t.pending_transfer_to === profile.id,
         );
     return visible
       .filter((t) => t.status !== 'finished')
@@ -228,6 +317,14 @@ function AppContent() {
 
   return (
     <div className="flex h-screen overflow-hidden bg-ink-950">
+      {pendingTransfer && pendingTransfer.pending_transfer_to === profile.id && (
+        <TransferAcceptModal
+          ticket={pendingTransfer}
+          busy={transferBusy}
+          onAccept={() => void handleAcceptTransfer()}
+          onReject={() => void handleRejectTransfer()}
+        />
+      )}
       <Sidebar
         active={activeTab}
         onNavigate={handleNavigate}

@@ -65,7 +65,8 @@ export function ChatView({ preselectedTicketId, onConsumePreselect, onSelectedTi
       (t) =>
         t.status === 'triage' ||
         (profile?.sectorId != null && t.sectorId === profile.sectorId) ||
-        t.assigned_to === profile?.id,
+        t.assigned_to === profile?.id ||
+        t.pending_transfer_to === profile?.id,
     );
   }, [tickets, profile, isAdmin]);
 
@@ -85,7 +86,12 @@ export function ChatView({ preselectedTicketId, onConsumePreselect, onSelectedTi
       case 'finished':
         return deptFiltered.filter((t) => t.status === 'finished');
       case 'mine':
-        return deptFiltered.filter((t) => t.assigned_to === profile?.id && t.status !== 'finished');
+        return deptFiltered.filter(
+          (t) =>
+            (t.assigned_to === profile?.id ||
+              t.pending_transfer_to === profile?.id) &&
+            t.status !== 'finished',
+        );
       case 'all':
       default:
         // Todos: inclui finalizados — a conversa permanece na lista após encerrar.
@@ -166,6 +172,10 @@ export function ChatView({ preselectedTicketId, onConsumePreselect, onSelectedTi
         notifyCustomer: options?.notifyCustomer ?? false,
       }),
     });
+  };
+
+  const handleCancelTransfer = async (ticket: Ticket) => {
+    await api(`/tickets/${ticket.id}/transfer/cancel`, { method: 'PATCH' });
   };
 
   const tabConfig: { id: TabFilter; label: string; count: number; icon: React.ReactNode }[] = [
@@ -301,6 +311,9 @@ export function ChatView({ preselectedTicketId, onConsumePreselect, onSelectedTi
           }}
           onTransfer={(agentId: string | null, options?: { notifyCustomer: boolean }) => {
             void handleTransfer(selectedTicket, agentId, options);
+          }}
+          onCancelTransfer={() => {
+            void handleCancelTransfer(selectedTicket);
           }}
           onTagApplied={refetchTags}
           allTags={tags}

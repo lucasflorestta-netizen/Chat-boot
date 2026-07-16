@@ -40,6 +40,7 @@ interface ChatDetailProps {
   onFinish: () => void;
   onFinishSilent: () => void;
   onTransfer: (agentId: string | null, options?: { notifyCustomer: boolean }) => void;
+  onCancelTransfer?: () => void;
   onTagApplied: () => void;
   allTags: Tag[];
   wallpaperClassName: string;
@@ -58,6 +59,7 @@ export function ChatDetail({
   onFinish,
   onFinishSilent,
   onTransfer,
+  onCancelTransfer,
   onTagApplied,
   allTags,
   wallpaperClassName,
@@ -528,6 +530,27 @@ export function ChatDetail({
           </span>
         </div>
       )}
+
+      {ticket.pending_transfer_to &&
+        ticket.pending_transfer_from === profile?.id && (
+          <div className="px-3 py-2 border-b border-ink-700 bg-brand-500/10 flex items-center justify-between gap-2 text-xs">
+            <span className="text-brand-200">
+              Aguardando aceite de{' '}
+              <span className="font-medium text-white">
+                {ticket.pending_transfer_to_agent?.name?.trim() || 'agente'}
+              </span>
+            </span>
+            {onCancelTransfer && (
+              <button
+                type="button"
+                onClick={onCancelTransfer}
+                className="px-2 py-1 rounded-md bg-ink-700 hover:bg-ink-600 text-ink-100"
+              >
+                Cancelar
+              </button>
+            )}
+          </div>
+        )}
 
       {/* Actions dropdown */}
       {showActionsMenu && (

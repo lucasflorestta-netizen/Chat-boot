@@ -86,6 +86,11 @@ export function useTickets(_filter?: { status?: string; department?: string; ass
             ? { ...existing.contact, ...mapped.contact }
             : existing.contact,
           assigned_agent: mapped.assigned_agent ?? existing.assigned_agent,
+          pending_transfer_to_agent:
+            mapped.pending_transfer_to_agent ?? existing.pending_transfer_to_agent,
+          pending_transfer_from_agent:
+            mapped.pending_transfer_from_agent ??
+            existing.pending_transfer_from_agent,
           tags: mapped.tags?.length ? mapped.tags : existing.tags,
         };
         const next = [...prev];
@@ -100,6 +105,10 @@ export function useTickets(_filter?: { status?: string; department?: string; ass
     socket.on('ticket.created', onCreated);
     socket.on('ticket.updated', onUpdated);
     socket.on('ticket_updated', onUpdated);
+    socket.on('ticket.transfer.requested', onUpdated);
+    socket.on('ticket.transfer.accepted', onUpdated);
+    socket.on('ticket.transfer.rejected', onUpdated);
+    socket.on('ticket.transfer.cancelled', onUpdated);
     socket.on('message.created', onMessage);
     socket.on('new_message', onMessage);
     socket.on('contact.updated', onContact);
@@ -109,6 +118,10 @@ export function useTickets(_filter?: { status?: string; department?: string; ass
       socket.off('ticket.created', onCreated);
       socket.off('ticket.updated', onUpdated);
       socket.off('ticket_updated', onUpdated);
+      socket.off('ticket.transfer.requested', onUpdated);
+      socket.off('ticket.transfer.accepted', onUpdated);
+      socket.off('ticket.transfer.rejected', onUpdated);
+      socket.off('ticket.transfer.cancelled', onUpdated);
       socket.off('message.created', onMessage);
       socket.off('new_message', onMessage);
       socket.off('contact.updated', onContact);

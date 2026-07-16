@@ -55,6 +55,12 @@ export interface Ticket {
   contact?: Contact;
   assigned_agent?: Profile | null;
   tags?: Tag[];
+  /** Pending hand-off — assignee unchanged until accept. */
+  pending_transfer_to?: string | null;
+  pending_transfer_from?: string | null;
+  pending_transfer_at?: string | null;
+  pending_transfer_to_agent?: Profile | null;
+  pending_transfer_from_agent?: Profile | null;
 }
 
 /** Client-only send state for optimistic UI (not stored in DB). */

@@ -185,6 +185,23 @@ export function mapTicket(raw: any): Ticket {
         ? mapProfile(raw.assigned_agent)
         : null,
     tags,
+    pending_transfer_to:
+      raw.pendingTransferToId ?? raw.pending_transfer_to ?? null,
+    pending_transfer_from:
+      raw.pendingTransferFromId ?? raw.pending_transfer_from ?? null,
+    pending_transfer_at: isoOrNull(
+      raw.pendingTransferAt ?? raw.pending_transfer_at,
+    ),
+    pending_transfer_to_agent: raw.pendingTransferTo
+      ? mapProfile(raw.pendingTransferTo)
+      : raw.pending_transfer_to_agent
+        ? mapProfile(raw.pending_transfer_to_agent)
+        : null,
+    pending_transfer_from_agent: raw.pendingTransferFrom
+      ? mapProfile(raw.pendingTransferFrom)
+      : raw.pending_transfer_from_agent
+        ? mapProfile(raw.pending_transfer_from_agent)
+        : null,
   };
 }
 
