@@ -4,14 +4,17 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
+    "dev": "node scripts/copy-dict.mjs && vite",
+    "build": "node scripts/copy-dict.mjs && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit -p tsconfig.app.json"
+    "typecheck": "tsc --noEmit -p tsconfig.app.json",
+    "postinstall": "node scripts/copy-dict.mjs"
   },
   "dependencies": {
+    "dictionary-pt": "^4.0.0",
     "lucide-react": "^0.344.0",
+    "nspell": "^2.1.5",
     "qrcode.react": "^4.2.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -19,6 +22,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.9.1",
+    "@types/nspell": "^2.1.6",
     "@types/react": "^18.3.5",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",

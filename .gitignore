@@ -21,5 +21,6 @@ dist-ssr
 *.sln
 *.sw?
 .env
+public/dictionaries/
 services/whatsapp-bridge/data/
 services/whatsapp-bridge/.env

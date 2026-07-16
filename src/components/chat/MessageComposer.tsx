@@ -1,6 +1,13 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Loader2, Paperclip, Send, Smile, Zap } from 'lucide-react';
 import type { CannedResponse, Message } from '../../types';
+import { autoCapitalize } from '../../lib/autoCapitalize';
+import {
+  applyWordReplacement,
+  checkCompletedWord,
+  prefetchSpellcheck,
+  type SpellSuggestion,
+} from '../../lib/spellcheck';
 import { ReplyPreviewBar } from './ReplyPreviewBar';
 import { VoiceRecorder } from './VoiceRecorder';
 
@@ -32,6 +39,58 @@ export function MessageComposer({
   const [showCanned, setShowCanned] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [voiceBusy, setVoiceBusy] = useState(false);
+  const [spellHint, setSpellHint] = useState<SpellSuggestion | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const spellRequestId = useRef(0);
+
+  useEffect(() => {
+    prefetchSpellcheck();
+  }, []);
+
+  const restoreCursor = (pos: number) => {
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.setSelectionRange(pos, pos);
+    });
+  };
+
+  const runSpellcheck = (value: string, cursor: number) => {
+    const id = ++spellRequestId.current;
+    void checkCompletedWord(value, cursor).then((hint) => {
+      if (id !== spellRequestId.current) return;
+      setSpellHint(hint);
+    });
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const el = e.target;
+    const cursor = el.selectionStart ?? el.value.length;
+    const next = autoCapitalize(el.value);
+    setInput(next);
+    restoreCursor(cursor);
+
+    if (showCanned || showEmoji) {
+      setSpellHint(null);
+      return;
+    }
+    runSpellcheck(next, cursor);
+  };
+
+  const applySuggestion = (suggestion: string) => {
+    if (!spellHint) return;
+    const next = applyWordReplacement(
+      input,
+      spellHint.start,
+      spellHint.end,
+      suggestion,
+    );
+    setInput(next);
+    setSpellHint(null);
+    const newPos = spellHint.start + suggestion.length;
+    restoreCursor(newPos);
+    textareaRef.current?.focus();
+  };
 
   const handleSend = async () => {
     if (!input.trim() || uploading || disabled) return;
@@ -39,6 +98,7 @@ export function MessageComposer({
     setInput('');
     setShowEmoji(false);
     setShowCanned(false);
+    setSpellHint(null);
     setError(null);
     try {
       await onSendText(body);
@@ -66,6 +126,7 @@ export function MessageComposer({
   };
 
   const canType = !voiceBusy;
+  const showSpellChips = Boolean(spellHint && !showCanned && !showEmoji && canType);
 
   return (
     <div className="border-t border-ink-700 bg-ink-900 p-3 relative">
@@ -92,7 +153,34 @@ export function MessageComposer({
       )}
 
       {showEmoji && canType && (
-        <EmojiPicker onSelect={(e) => setInput((prev) => prev + e)} />
+        <EmojiPicker onSelect={(e) => setInput((prev) => autoCapitalize(prev + e))} />
+      )}
+
+      {showSpellChips && spellHint && (
+        <div className="mb-2 card p-1.5 animate-fade-in">
+          <p className="text-xs text-ink-300 px-2 py-1">
+            Correções para <span className="text-ink-100">“{spellHint.word}”</span>
+          </p>
+          <div className="flex flex-wrap gap-1 px-1 pb-1">
+            {spellHint.suggestions.map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => applySuggestion(s)}
+                className="px-2.5 py-1.5 rounded-md text-sm hover:bg-ink-700 text-ink-100"
+              >
+                {s}
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={() => setSpellHint(null)}
+              className="px-2.5 py-1.5 rounded-md text-xs text-ink-400 hover:bg-ink-700"
+            >
+              Ignorar
+            </button>
+          </div>
+        </div>
       )}
 
       {replyingTo && (
@@ -131,7 +219,11 @@ export function MessageComposer({
               </label>
               <button
                 type="button"
-                onClick={() => setShowEmoji(!showEmoji)}
+                onClick={() => {
+                  setShowEmoji(!showEmoji);
+                  setShowCanned(false);
+                  setSpellHint(null);
+                }}
                 className="btn-ghost p-2 rounded-lg"
                 title="Emoji"
                 disabled={disabled}
@@ -140,7 +232,11 @@ export function MessageComposer({
               </button>
               <button
                 type="button"
-                onClick={() => setShowCanned(!showCanned)}
+                onClick={() => {
+                  setShowCanned(!showCanned);
+                  setShowEmoji(false);
+                  setSpellHint(null);
+                }}
                 className="btn-ghost p-2 rounded-lg"
                 title="Respostas rápidas"
                 disabled={disabled}
@@ -150,8 +246,14 @@ export function MessageComposer({
             </div>
 
             <textarea
+              ref={textareaRef}
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={handleInputChange}
+              onBlur={() => {
+                const el = textareaRef.current;
+                if (!el || showCanned || showEmoji) return;
+                runSpellcheck(el.value, el.selectionStart ?? el.value.length);
+              }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
@@ -161,6 +263,9 @@ export function MessageComposer({
               placeholder="Digite uma mensagem... (use / para respostas rápidas)"
               rows={1}
               disabled={disabled || uploading}
+              spellCheck
+              lang="pt-BR"
+              autoCapitalize="sentences"
               className="input flex-1 resize-none max-h-32"
             />
           </>

@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { AuthScreen } from './components/AuthScreen';
 import { Sidebar, type TabId } from './components/layout/Sidebar';
@@ -12,14 +12,92 @@ import { TagsView } from './components/views/TagsView';
 import { CannedView } from './components/views/CannedView';
 import { useNotifications } from './hooks/useNotifications';
 import { useTickets } from './hooks/useData';
+import { connectSocket } from './lib/socket';
+import { mapMediaType } from './lib/mappers';
 import { Loader2, Bell } from 'lucide-react';
+
+const TOAST_BODY_MAX = 120;
+
+function previewClientMessage(message: {
+  body?: string | null;
+  mediaType?: string | null;
+  media_type?: string | null;
+}): string {
+  const body = (message.body ?? '').trim();
+  if (body) {
+    return body.length > TOAST_BODY_MAX ? `${body.slice(0, TOAST_BODY_MAX)}…` : body;
+  }
+  const media = mapMediaType(message.mediaType ?? message.media_type);
+  switch (media) {
+    case 'image':
+      return 'Enviou uma imagem';
+    case 'audio':
+      return 'Enviou um áudio';
+    case 'video':
+      return 'Enviou um vídeo';
+    case 'sticker':
+      return 'Enviou um sticker';
+    case 'file':
+      return 'Enviou um arquivo';
+    default:
+      return 'Nova mensagem';
+  }
+}
 
 function AppContent() {
   const { session, profile, loading } = useAuth();
   const [activeTab, setActiveTab] = useState<TabId>('dashboard');
   const [preselectedTicket, setPreselectedTicket] = useState<string | null>(null);
+  const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
+  const selectedTicketIdRef = useRef<string | null>(null);
   const { notifications, notify, soundEnabled, setSoundEnabled } = useNotifications();
   const { tickets } = useTickets();
+  const ticketsRef = useRef(tickets);
+  ticketsRef.current = tickets;
+  selectedTicketIdRef.current = selectedTicketId;
+
+  const handleSelectedTicketChange = useCallback((ticketId: string | null) => {
+    setSelectedTicketId(ticketId);
+  }, []);
+
+  useEffect(() => {
+    if (!profile) return;
+    const socket = connectSocket();
+
+    const onMessage = (payload: {
+      message?: {
+        sender?: string;
+        ticketId?: string;
+        body?: string | null;
+        mediaType?: string | null;
+        media_type?: string | null;
+      };
+      ticket?: { id?: string; assigneeId?: string | null; assigned_to?: string | null };
+    }) => {
+      const message = payload?.message;
+      const ticket = payload?.ticket;
+      if (!message) return;
+
+      const sender = message.sender;
+      if (sender !== 'CONTATO' && sender !== 'client') return;
+
+      const assigneeId = ticket?.assigneeId ?? ticket?.assigned_to ?? null;
+      if (!assigneeId || assigneeId !== profile.id) return;
+
+      const tid = message.ticketId ?? ticket?.id;
+      if (!tid) return;
+      if (activeTab === 'chat' && tid === selectedTicketIdRef.current) return;
+
+      const listed = ticketsRef.current.find((t) => t.id === tid);
+      const contactName = listed?.contact?.name?.trim() || 'Cliente';
+      notify('message', contactName, previewClientMessage(message));
+    };
+
+    socket.on('message.created', onMessage);
+    return () => {
+      socket.off('message.created', onMessage);
+    };
+  }, [profile, notify, activeTab]);
 
   const unreadCount = useMemo(() => {
     if (!profile) return 0;
@@ -56,7 +134,11 @@ function AppContent() {
   };
 
   const handleNavigate = (tab: TabId) => {
-    setActiveTab(guardedTab(tab));
+    const next = guardedTab(tab);
+    if (next !== 'chat') {
+      setSelectedTicketId(null);
+    }
+    setActiveTab(next);
   };
 
   const handleStartConversation = (ticketId: string) => {
@@ -87,7 +169,7 @@ function AppContent() {
           <ChatView
             preselectedTicketId={preselectedTicket}
             onConsumePreselect={() => setPreselectedTicket(null)}
-            onNotify={notify}
+            onSelectedTicketChange={handleSelectedTicketChange}
           />
         )}
         {activeTab === 'contacts' && <ContactsView onStartConversation={handleStartConversation} />}

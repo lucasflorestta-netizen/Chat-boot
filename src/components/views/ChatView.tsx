@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTickets, useTags } from '../../hooks/useData';
 import { api } from '../../lib/api';
-import { connectSocket } from '../../lib/socket';
 import { departmentLabel } from '../../lib/mappers';
 import { useAuth } from '../../context/AuthContext';
 import type { Ticket } from '../../types';
@@ -26,12 +25,12 @@ import {
 interface ChatViewProps {
   preselectedTicketId?: string | null;
   onConsumePreselect?: () => void;
-  onNotify?: (type: 'message' | 'ticket', title: string, body: string) => void;
+  onSelectedTicketChange?: (ticketId: string | null) => void;
 }
 
 type TabFilter = 'all' | 'triage' | 'attending' | 'finished' | 'mine';
 
-export function ChatView({ preselectedTicketId, onConsumePreselect, onNotify }: ChatViewProps) {
+export function ChatView({ preselectedTicketId, onConsumePreselect, onSelectedTicketChange }: ChatViewProps) {
   const { profile } = useAuth();
   const isAdmin = profile?.role === 'admin';
   const [search, setSearch] = useState('');
@@ -115,6 +114,10 @@ export function ChatView({ preselectedTicketId, onConsumePreselect, onNotify }: 
   }, [tickets, selectedTicket]);
 
   useEffect(() => {
+    onSelectedTicketChange?.(selectedTicket?.id ?? null);
+  }, [selectedTicket?.id, onSelectedTicketChange]);
+
+  useEffect(() => {
     if (preselectedTicketId) {
       const ticket = tickets.find((t) => t.id === preselectedTicketId);
       if (ticket) {
@@ -123,24 +126,6 @@ export function ChatView({ preselectedTicketId, onConsumePreselect, onNotify }: 
       }
     }
   }, [preselectedTicketId, tickets, onConsumePreselect]);
-
-  useEffect(() => {
-    if (!profile) return;
-    const socket = connectSocket();
-    const onMessage = (payload: { message?: { sender?: string; ticketId?: string }; ticket?: { id?: string } }) => {
-      const sender = payload?.message?.sender;
-      const tid = payload?.message?.ticketId ?? payload?.ticket?.id;
-      if ((sender === 'CONTATO' || sender === 'client') && tid && tid !== selectedTicket?.id) {
-        onNotify?.('message', 'Nova mensagem', 'Você recebeu uma nova mensagem de cliente');
-      }
-    };
-    socket.on('message.created', onMessage);
-    socket.on('new_message', onMessage);
-    return () => {
-      socket.off('message.created', onMessage);
-      socket.off('new_message', onMessage);
-    };
-  }, [profile, onNotify, selectedTicket]);
 
   const handleSelectTicket = (ticket: Ticket) => {
     setSelectedTicket(ticket);

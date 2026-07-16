@@ -28,6 +28,7 @@ import {
   PauseCircle,
   Palette,
   Upload,
+  Eye,
 } from 'lucide-react';
 
 const NEAR_BOTTOM_PX = 120;
@@ -380,6 +381,10 @@ export function ChatDetail({
 
   const isAssignedToMe = ticket.assigned_to === profile?.id;
   const canInteract = ticket.status !== 'finished' && (isAssignedToMe || ticket.status === 'triage');
+  const isMirrorMode =
+    profile?.role === 'admin' &&
+    !!ticket.assigned_to &&
+    ticket.assigned_to !== profile.id;
 
   const onDragEnter = (e: React.DragEvent) => {
     if (!canInteract) return;
@@ -539,6 +544,16 @@ export function ChatDetail({
           />
         )}
       </div>
+
+      {isMirrorMode && (
+        <div className="px-3 py-1.5 border-b border-ink-700 bg-ink-800/80 flex items-center gap-2 text-xs text-ink-300">
+          <Eye className="w-3.5 h-3.5 text-brand-400 flex-shrink-0" />
+          <span>
+            Modo leitura — acompanhando atendimento
+            {ticket.assigned_agent?.name ? ` de ${ticket.assigned_agent.name}` : ''}
+          </span>
+        </div>
+      )}
 
       {/* Actions dropdown */}
       {showActionsMenu && (
