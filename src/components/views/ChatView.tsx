@@ -69,25 +69,29 @@ export function ChatView({ preselectedTicketId, onConsumePreselect, onSelectedTi
     );
   }, [tickets, profile, isAdmin]);
 
-  const openTickets = useMemo(
-    () => deptFiltered.filter((t) => t.status !== 'finished'),
+  /** Clientes aguardando atendimento (sem responsável). */
+  const triageTickets = useMemo(
+    () =>
+      deptFiltered.filter((t) => t.status === 'triage' && !t.assigned_to),
     [deptFiltered],
   );
 
   const tabFiltered = useMemo(() => {
     switch (tab) {
       case 'triage':
-        return deptFiltered.filter((t) => t.status === 'triage');
+        return triageTickets;
       case 'attending':
         return deptFiltered.filter((t) => t.status === 'attending');
       case 'finished':
         return deptFiltered.filter((t) => t.status === 'finished');
       case 'mine':
         return deptFiltered.filter((t) => t.assigned_to === profile?.id && t.status !== 'finished');
+      case 'all':
       default:
-        return openTickets;
+        // Todos: inclui finalizados — a conversa permanece na lista após encerrar.
+        return deptFiltered;
     }
-  }, [deptFiltered, openTickets, tab, profile]);
+  }, [deptFiltered, triageTickets, tab, profile]);
 
   const searched = useMemo(() => {
     let result = tabFiltered;
@@ -168,13 +172,13 @@ export function ChatView({ preselectedTicketId, onConsumePreselect, onSelectedTi
     {
       id: 'all',
       label: 'Todos',
-      count: openTickets.length,
+      count: deptFiltered.length,
       icon: <Inbox className="w-3.5 h-3.5" />,
     },
     {
       id: 'triage',
       label: 'Triagem',
-      count: deptFiltered.filter((t) => t.status === 'triage').length,
+      count: triageTickets.length,
       icon: <CircleDot className="w-3.5 h-3.5" />,
     },
     {
