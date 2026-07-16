@@ -12,6 +12,7 @@ import { SettingsView } from './components/views/SettingsView';
 import { TagsView } from './components/views/TagsView';
 import { CannedView } from './components/views/CannedView';
 import { InternalChatView } from './components/views/InternalChatView';
+import { GroupsView } from './components/views/GroupsView';
 import { useNotifications } from './hooks/useNotifications';
 import { useTickets } from './hooks/useData';
 import { api } from './lib/api';
@@ -70,6 +71,7 @@ const AGENT_BLOCKED_TABS: TabId[] = [
   'users',
   'auto-messages',
   'settings',
+  'grupos',
 ];
 
 function AppContent() {
@@ -354,6 +356,7 @@ function AppContent() {
         {activeTab === 'tags' && profile.role === 'admin' && <TagsView />}
         {activeTab === 'canned' && profile.role === 'admin' && <CannedView />}
         {activeTab === 'comunicador-interno' && <InternalChatView />}
+        {activeTab === 'grupos' && profile.role === 'admin' && <GroupsView />}
       </main>
 
       <div className="fixed bottom-4 right-4 space-y-2 z-50">

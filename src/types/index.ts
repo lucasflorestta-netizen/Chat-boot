@@ -38,6 +38,26 @@ export interface Contact {
   updated_at: string;
 }
 
+export interface WhatsappGroup {
+  id: string;
+  subject: string;
+  description: string | null;
+  participantsCount: number;
+  owner: string | null;
+  creation: string | null;
+  profilePicUrl: string | null;
+}
+
+export interface WhatsappGroupMessage {
+  id: string;
+  groupJid: string;
+  fromMe: boolean;
+  senderJid?: string | null;
+  senderName?: string | null;
+  text: string;
+  timestamp: string;
+}
+
 export interface Ticket {
   id: string;
   contact_id: string;
