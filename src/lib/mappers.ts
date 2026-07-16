@@ -175,7 +175,6 @@ export function mapTicket(raw: any): Ticket {
     priority: mapPriority(raw.priority),
     unread_count: raw.unreadCount ?? raw.unread_count ?? 0,
     last_message_at: iso(raw.lastMessageAt ?? raw.last_message_at),
-    bot_paused: raw.botPaused ?? raw.bot_paused ?? false,
     created_at: iso(raw.createdAt ?? raw.created_at),
     updated_at: iso(raw.updatedAt ?? raw.updated_at),
     finished_at: isoOrNull(raw.finishedAt ?? raw.finished_at),

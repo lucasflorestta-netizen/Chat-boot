@@ -26,8 +26,6 @@ import {
   MoreVertical,
   MessageSquare,
   ChevronDown,
-  Bot,
-  PauseCircle,
   Settings,
   Upload,
   Eye,
@@ -88,7 +86,6 @@ export function ChatDetail({
   const [showTransfer, setShowTransfer] = useState(false);
   const [transferTargetId, setTransferTargetId] = useState<string | null>(null);
   const [showJumpLatest, setShowJumpLatest] = useState(false);
-  const [togglingBotPause, setTogglingBotPause] = useState(false);
   const [showWallpaperPicker, setShowWallpaperPicker] = useState(false);
   const [fileQueue, setFileQueue] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -107,22 +104,6 @@ export function ChatDetail({
     stickToBottomRef.current = true;
     setShowJumpLatest(false);
   }, []);
-
-  const handleToggleBotPaused = async () => {
-    if (togglingBotPause) return;
-    setTogglingBotPause(true);
-    setShowActionsMenu(false);
-    try {
-      await api(`/tickets/${ticket.id}/bot-pause`, {
-        method: 'PATCH',
-        body: JSON.stringify({ paused: !ticket.bot_paused }),
-      });
-    } catch (err) {
-      console.error('Error toggling bot pause:', err);
-    } finally {
-      setTogglingBotPause(false);
-    }
-  };
 
   const handleScroll = () => {
     const el = scrollRef.current;
@@ -486,15 +467,6 @@ export function ChatDetail({
         ticket={ticket}
         actions={
           <div className="flex items-center gap-1">
-            {ticket.bot_paused && (
-              <span
-                className="hidden sm:inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md bg-warning-500/15 text-warning-400"
-                title="Bot pausado neste ticket"
-              >
-                <PauseCircle className="w-3.5 h-3.5" />
-                Bot pausado
-              </span>
-            )}
             {needsAssume && (
               <button onClick={onAssign} className="btn-primary text-xs px-3 py-1.5">
                 Assumir Atendimento
@@ -559,23 +531,6 @@ export function ChatDetail({
         <>
           <div className="fixed inset-0 z-10" onClick={() => setShowActionsMenu(false)} />
           <div className="absolute z-20 top-14 right-4 w-56 card p-1.5 shadow-2xl animate-fade-in">
-            <button
-              onClick={handleToggleBotPaused}
-              disabled={togglingBotPause}
-              className="w-full flex items-center gap-2 px-2.5 py-2 rounded-md hover:bg-ink-700 text-sm text-ink-100 disabled:opacity-50"
-            >
-              {ticket.bot_paused ? (
-                <>
-                  <Bot className="w-4 h-4 text-success-500" />
-                  Retomar bot
-                </>
-              ) : (
-                <>
-                  <PauseCircle className="w-4 h-4 text-warning-400" />
-                  Pausar bot
-                </>
-              )}
-            </button>
             <button
               onClick={() => {
                 setShowTransfer(true);
