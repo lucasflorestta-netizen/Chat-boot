@@ -21,6 +21,7 @@ interface MessageComposerProps {
   canned: CannedResponse[];
   disabled?: boolean;
   uploading?: boolean;
+  placeholder?: string;
 }
 
 export function MessageComposer({
@@ -33,6 +34,7 @@ export function MessageComposer({
   canned,
   disabled,
   uploading = false,
+  placeholder = 'Digite uma mensagem... (use / para respostas rápidas)',
 }: MessageComposerProps) {
   const [input, setInput] = useState('');
   const [showEmoji, setShowEmoji] = useState(false);
@@ -46,6 +48,14 @@ export function MessageComposer({
   useEffect(() => {
     prefetchSpellcheck();
   }, []);
+
+  useEffect(() => {
+    if (!disabled) return;
+    setInput('');
+    setShowEmoji(false);
+    setShowCanned(false);
+    setSpellHint(null);
+  }, [disabled]);
 
   const restoreCursor = (pos: number) => {
     requestAnimationFrame(() => {
@@ -64,6 +74,7 @@ export function MessageComposer({
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    if (disabled) return;
     const el = e.target;
     const cursor = el.selectionStart ?? el.value.length;
     const next = autoCapitalize(el.value);
@@ -126,11 +137,11 @@ export function MessageComposer({
   };
 
   const canType = !voiceBusy;
-  const showSpellChips = Boolean(spellHint && !showCanned && !showEmoji && canType);
+  const showSpellChips = Boolean(spellHint && !showCanned && !showEmoji && canType && !disabled);
 
   return (
     <div className="border-t border-ink-700 bg-ink-900 p-3 relative">
-      {showCanned && canType && (
+      {showCanned && canType && !disabled && (
         <div className="mb-2 max-h-48 overflow-y-auto card p-1.5">
           {canned.map((c) => (
             <button
@@ -152,7 +163,7 @@ export function MessageComposer({
         </div>
       )}
 
-      {showEmoji && canType && (
+      {showEmoji && canType && !disabled && (
         <EmojiPicker onSelect={(e) => setInput((prev) => autoCapitalize(prev + e))} />
       )}
 
@@ -260,18 +271,19 @@ export function MessageComposer({
                   void handleSend();
                 }
               }}
-              placeholder="Digite uma mensagem... (use / para respostas rápidas)"
+              placeholder={placeholder}
               rows={1}
               disabled={disabled || uploading}
+              readOnly={disabled}
               spellCheck
               lang="pt-BR"
               autoCapitalize="sentences"
-              className="input flex-1 resize-none max-h-32"
+              className={`input flex-1 resize-none max-h-32 ${disabled ? 'opacity-60 cursor-not-allowed' : ''}`}
             />
           </>
         )}
 
-        {input.trim() && canType ? (
+        {input.trim() && canType && !disabled ? (
           <button
             type="button"
             onClick={() => void handleSend()}

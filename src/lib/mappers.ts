@@ -1,5 +1,6 @@
 import { mediaUrl } from './api';
 import type {
+  AppearanceSettings,
   AutoMessageSettings,
   CannedResponse,
   Contact,
@@ -111,6 +112,7 @@ export function mapProfile(raw: any): Profile {
     name: raw.name || raw.username || 'Usuário',
     email: raw.email ?? null,
     role: mapRole(raw.role),
+    apiRole: String(raw.role ?? 'OPERATOR'),
     department: mapSectorToDepartment(sectorName),
     sectorId: raw.sectorId ?? raw.sector?.id ?? null,
     max_concurrent_chats: raw.limiteSimultaneo ?? raw.max_concurrent_chats ?? 5,
@@ -124,13 +126,24 @@ export function mapProfile(raw: any): Profile {
   };
 }
 
+export function mapAppearanceSettings(raw: any): AppearanceSettings {
+  return {
+    id: raw.id,
+    wallpaperKey: raw.wallpaperKey ?? raw.wallpaper_key ?? 'linen',
+    customImageUrl: raw.customImageUrl ?? raw.custom_image_url ?? null,
+    updatedAt: iso(raw.updatedAt ?? raw.updated_at),
+  };
+}
+
 export function mapContact(raw: any): Contact {
   return {
     id: raw.id,
     name: raw.displayName || raw.name || raw.phone || raw.jid || 'Contato',
     phone: raw.phone || raw.jid?.split('@')[0] || '',
     whatsapp_lid: raw.whatsappLid ?? raw.whatsapp_lid ?? null,
-    profile_pic_url: mediaUrl(raw.profilePicUrl ?? raw.profile_pic_url),
+    profile_pic_url: mediaUrl(
+      raw.profilePicUrl ?? raw.profile_pic_url ?? raw.photo ?? null,
+    ),
     notes: raw.notes ?? null,
     created_at: iso(raw.createdAt ?? raw.created_at),
     updated_at: iso(raw.updatedAt ?? raw.updated_at),
@@ -186,7 +199,19 @@ export function mapMessage(raw: any): Message {
     media_type: mapMediaType(raw.mediaType ?? raw.media_type),
     media_url: mediaUrl(raw.mediaUrl ?? raw.media_url),
     media_name: raw.mediaName ?? raw.media_name ?? null,
-    is_deleted: raw.isDeleted ?? raw.is_deleted ?? false,
+    is_deleted:
+      raw.deletedByClient ??
+      raw.deleted_by_client ??
+      raw.isDeleted ??
+      raw.is_deleted ??
+      false,
+    deleted_by_client:
+      raw.deletedByClient ??
+      raw.deleted_by_client ??
+      raw.isDeleted ??
+      raw.is_deleted ??
+      false,
+    is_edited: raw.isEdited ?? raw.is_edited ?? false,
     original_body: raw.originalBody ?? raw.original_body ?? null,
     whatsapp_delivered: raw.whatsappDelivered ?? raw.whatsapp_delivered ?? false,
     whatsapp_message_id: raw.whatsappMessageId ?? raw.whatsapp_message_id ?? null,

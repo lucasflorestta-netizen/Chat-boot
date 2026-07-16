@@ -26,7 +26,7 @@ export function replyAuthorLabel(message: Message, contactName?: string | null):
 }
 
 export function replySnippet(message: Message): string {
-  if (message.is_deleted) return 'Mensagem apagada';
+  if (message.deleted_by_client || message.is_deleted) return 'Mensagem apagada';
   if (message.body?.trim()) {
     const text = message.body.trim();
     return text.length > 80 ? `${text.slice(0, 80)}…` : text;

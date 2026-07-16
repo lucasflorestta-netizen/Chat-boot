@@ -1,10 +1,12 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
+  Check,
+  Eye,
   FileText,
   Paperclip,
+  Pencil,
   Reply,
   StickyNote,
-  Trash2,
   X,
 } from 'lucide-react';
 import type { Message } from '../../types';
@@ -16,14 +18,34 @@ interface MessageBubbleProps {
   message: Message;
   contactName?: string | null;
   onReply?: (message: Message) => void;
+  onEdit?: (message: Message, body: string) => Promise<void>;
 }
 
-export function MessageBubble({ message, contactName, onReply }: MessageBubbleProps) {
+export function MessageBubble({
+  message,
+  contactName,
+  onReply,
+  onEdit,
+}: MessageBubbleProps) {
   const isClient = message.sender_type === 'client';
   const isNote = message.media_type === 'note';
   const isSystem = message.sender_type === 'system' || message.sender_type === 'bot';
+  const deletedByClient = message.deleted_by_client || message.is_deleted;
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(message.body ?? '');
+  const [saving, setSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const canReply = Boolean(onReply) && !isNote && !isSystem && !message._localStatus;
+  const canEdit =
+    Boolean(onEdit) &&
+    !isClient &&
+    !isNote &&
+    !isSystem &&
+    !deletedByClient &&
+    Boolean(message.body?.trim()) &&
+    !message._localStatus;
 
   if (isNote) {
     return (
@@ -61,23 +83,133 @@ export function MessageBubble({ message, contactName, onReply }: MessageBubblePr
     onReply?.(message);
   };
 
+  const startEdit = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setDraft(message.body ?? '');
+    setEditError(null);
+    setEditing(true);
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(el.value.length, el.value.length);
+    });
+  };
+
+  const cancelEdit = () => {
+    setEditing(false);
+    setEditError(null);
+    setDraft(message.body ?? '');
+  };
+
+  const saveEdit = async () => {
+    const trimmed = draft.trim();
+    if (!onEdit || !trimmed || trimmed === (message.body ?? '').trim() || saving) {
+      if (trimmed === (message.body ?? '').trim()) cancelEdit();
+      return;
+    }
+    setSaving(true);
+    setEditError(null);
+    try {
+      await onEdit(message, trimmed);
+      setEditing(false);
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      console.error('Error editing message:', err);
+      setEditError(errorMsg || 'Falha ao editar mensagem');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const mediaAndBody = (
+    <>
+      {message.media_type === 'image' && message.media_url && (
+        <button
+          type="button"
+          className="block mb-2 max-w-full"
+          onClick={() => setLightboxUrl(message.media_url)}
+        >
+          <img
+            src={message.media_url}
+            alt={message.media_name || ''}
+            className="rounded-lg max-w-full max-h-72 object-cover cursor-zoom-in"
+          />
+        </button>
+      )}
+      {message.media_type === 'sticker' && message.media_url && (
+        <img src={message.media_url} alt="Sticker" className="mb-2 max-w-[160px]" />
+      )}
+      {message.media_type === 'audio' && message.media_url && (
+        <audio controls src={message.media_url} className="w-full min-w-[220px] mb-2" />
+      )}
+      {message.media_type === 'video' && message.media_url && (
+        <video controls src={message.media_url} className="rounded-lg mb-2 max-w-full max-h-72" />
+      )}
+      {message.media_type === 'file' && message.media_url && (
+        <a
+          href={message.media_url}
+          download={message.media_name || ''}
+          target="_blank"
+          rel="noreferrer"
+          className={`flex items-center gap-3 mb-2 rounded-lg p-2.5 ${
+            isClient ? 'bg-ink-800/80' : 'bg-black/15'
+          } hover:opacity-90`}
+        >
+          <div className="w-10 h-10 rounded-lg bg-white/10 flex items-center justify-center shrink-0">
+            {isPdf(message.media_name) ? (
+              <FileText className="w-5 h-5 text-danger-300" />
+            ) : (
+              <Paperclip className="w-5 h-5 text-white" />
+            )}
+          </div>
+          <div className="min-w-0">
+            <p className="text-sm text-white truncate">{message.media_name || 'Arquivo'}</p>
+            <p className="text-[10px] text-white/60">Toque para baixar</p>
+          </div>
+        </a>
+      )}
+      {message.body && (
+        <FormattedText
+          text={message.body}
+          className="text-sm text-white whitespace-pre-wrap break-words"
+        />
+      )}
+    </>
+  );
+
   return (
     <>
       <div
         className={`flex ${isClient ? 'justify-start' : 'justify-end'} group/row`}
-        onDoubleClick={() => canReply && onReply?.(message)}
+        onDoubleClick={() => canReply && !editing && onReply?.(message)}
       >
         <div className={`relative flex items-center gap-1 max-w-[85%] ${isClient ? 'flex-row' : 'flex-row-reverse'}`}>
-          {canReply && (
-            <button
-              type="button"
-              onClick={handleReplyClick}
-              className="opacity-0 group-hover/row:opacity-100 transition-opacity btn-ghost p-1.5 rounded-full bg-ink-800/80 border border-ink-600 shrink-0"
-              title="Responder"
-              aria-label="Responder"
-            >
-              <Reply className="w-3.5 h-3.5 text-ink-200" />
-            </button>
+          {!editing && (
+            <div className="flex items-center gap-0.5 shrink-0">
+              {canEdit && (
+                <button
+                  type="button"
+                  onClick={startEdit}
+                  className="opacity-0 group-hover/row:opacity-100 transition-opacity btn-ghost p-1.5 rounded-full bg-ink-800/80 border border-ink-600"
+                  title="Editar"
+                  aria-label="Editar"
+                >
+                  <Pencil className="w-3.5 h-3.5 text-ink-200" />
+                </button>
+              )}
+              {canReply && (
+                <button
+                  type="button"
+                  onClick={handleReplyClick}
+                  className="opacity-0 group-hover/row:opacity-100 transition-opacity btn-ghost p-1.5 rounded-full bg-ink-800/80 border border-ink-600"
+                  title="Responder"
+                  aria-label="Responder"
+                >
+                  <Reply className="w-3.5 h-3.5 text-ink-200" />
+                </button>
+              )}
+            </div>
           )}
 
           <div
@@ -91,7 +223,7 @@ export function MessageBubble({ message, contactName, onReply }: MessageBubblePr
               } rounded-tr-lg rounded-bl-lg`}
             />
 
-            {message.reply_to && (
+            {message.reply_to && !editing && (
               <div
                 className={`mb-2 rounded-md px-2 py-1.5 border-l-2 ${
                   isClient ? 'bg-ink-800/80 border-brand-400' : 'bg-black/20 border-white/70'
@@ -106,84 +238,83 @@ export function MessageBubble({ message, contactName, onReply }: MessageBubblePr
               </div>
             )}
 
-            {message.is_deleted ? (
-              <div>
-                <div className="flex items-center gap-1.5 text-warning-400 text-xs mb-1">
-                  <Trash2 className="w-3 h-3" />
-                  <span className="italic">Mensagem apagada pelo cliente</span>
-                </div>
-                <p className="text-sm text-ink-300 line-through whitespace-pre-wrap">{message.original_body}</p>
-              </div>
-            ) : (
-              <>
-                {message.media_type === 'image' && message.media_url && (
+            {editing ? (
+              <div className="min-w-[200px]">
+                <textarea
+                  ref={textareaRef}
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') {
+                      e.preventDefault();
+                      cancelEdit();
+                    }
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      void saveEdit();
+                    }
+                  }}
+                  disabled={saving}
+                  rows={3}
+                  className="w-full resize-y rounded-lg bg-black/20 border border-white/30 px-2 py-1.5 text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-1 focus:ring-white/50"
+                />
+                <div className="flex items-center justify-end gap-1 mt-1.5">
                   <button
                     type="button"
-                    className="block mb-2 max-w-full"
-                    onClick={() => setLightboxUrl(message.media_url)}
+                    onClick={cancelEdit}
+                    disabled={saving}
+                    className="btn-ghost p-1.5 rounded-full bg-black/20 hover:bg-black/30"
+                    title="Cancelar"
+                    aria-label="Cancelar"
                   >
-                    <img
-                      src={message.media_url}
-                      alt={message.media_name || ''}
-                      className="rounded-lg max-w-full max-h-72 object-cover cursor-zoom-in"
-                    />
+                    <X className="w-3.5 h-3.5 text-white/80" />
                   </button>
-                )}
-                {message.media_type === 'sticker' && message.media_url && (
-                  <img src={message.media_url} alt="Sticker" className="mb-2 max-w-[160px]" />
-                )}
-                {message.media_type === 'audio' && message.media_url && (
-                  <audio controls src={message.media_url} className="w-full min-w-[220px] mb-2" />
-                )}
-                {message.media_type === 'video' && message.media_url && (
-                  <video controls src={message.media_url} className="rounded-lg mb-2 max-w-full max-h-72" />
-                )}
-                {message.media_type === 'file' && message.media_url && (
-                  <a
-                    href={message.media_url}
-                    download={message.media_name || ''}
-                    target="_blank"
-                    rel="noreferrer"
-                    className={`flex items-center gap-3 mb-2 rounded-lg p-2.5 ${
-                      isClient ? 'bg-ink-800/80' : 'bg-black/15'
-                    } hover:opacity-90`}
+                  <button
+                    type="button"
+                    onClick={() => void saveEdit()}
+                    disabled={saving || !draft.trim()}
+                    className="btn-ghost p-1.5 rounded-full bg-white/20 hover:bg-white/30 disabled:opacity-40"
+                    title="Salvar"
+                    aria-label="Salvar"
                   >
-                    <div className="w-10 h-10 rounded-lg bg-white/10 flex items-center justify-center shrink-0">
-                      {isPdf(message.media_name) ? (
-                        <FileText className="w-5 h-5 text-danger-300" />
-                      ) : (
-                        <Paperclip className="w-5 h-5 text-white" />
-                      )}
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-sm text-white truncate">{message.media_name || 'Arquivo'}</p>
-                      <p className="text-[10px] text-white/60">Toque para baixar</p>
-                    </div>
-                  </a>
+                    <Check className="w-3.5 h-3.5 text-white" />
+                  </button>
+                </div>
+                {editError && (
+                  <p className="text-[10px] text-danger-300 mt-1.5 break-words">{editError}</p>
                 )}
-                {message.body && (
-                  <FormattedText
-                    text={message.body}
-                    className="text-sm text-white whitespace-pre-wrap break-words"
-                  />
-                )}
-              </>
+              </div>
+            ) : deletedByClient ? (
+              <div className="relative">
+                <div className="opacity-60">{mediaAndBody}</div>
+                <div className="mt-2 flex items-center gap-1.5 rounded-md bg-black/35 px-2 py-1.5 text-warning-300">
+                  <Eye className="w-3.5 h-3.5 shrink-0" />
+                  <span className="text-xs italic">Apagada pelo cliente</span>
+                </div>
+              </div>
+            ) : (
+              mediaAndBody
             )}
 
-            <div className="flex items-center gap-1 mt-0.5">
-              <span className="text-[10px] text-white/50 ml-auto flex items-center gap-1">
-                {new Date(message.created_at).toLocaleTimeString('pt-BR', {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                })}
-                {!isClient && (
-                  <MessageStatus
-                    localStatus={message._localStatus}
-                    whatsappDelivered={message.whatsapp_delivered}
-                  />
+            {!editing && (
+              <div className="flex flex-col items-end mt-0.5">
+                <span className="text-[10px] text-white/50 ml-auto flex items-center gap-1">
+                  {new Date(message.created_at).toLocaleTimeString('pt-BR', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })}
+                  {!isClient && (
+                    <MessageStatus
+                      localStatus={message._localStatus}
+                      whatsappDelivered={message.whatsapp_delivered}
+                    />
+                  )}
+                </span>
+                {message.is_edited && !deletedByClient && (
+                  <span className="text-[9px] text-white/40 leading-none mt-0.5">editada</span>
                 )}
-              </span>
-            </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -203,7 +334,7 @@ export function MessageBubble({ message, contactName, onReply }: MessageBubblePr
           <img
             src={lightboxUrl}
             alt=""
-            className="max-h-[90vh] max-w-[90vw] object-contain rounded-lg"
+            className="max-w-full max-h-[90vh] object-contain rounded-lg"
             onClick={(e) => e.stopPropagation()}
           />
         </div>
@@ -212,6 +343,6 @@ export function MessageBubble({ message, contactName, onReply }: MessageBubblePr
   );
 }
 
-function isPdf(name: string | null | undefined): boolean {
+function isPdf(name: string | null | undefined) {
   return Boolean(name?.toLowerCase().endsWith('.pdf'));
 }

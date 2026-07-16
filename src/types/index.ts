@@ -5,11 +5,16 @@ export type MessageType = 'text' | 'image' | 'audio' | 'file' | 'video' | 'note'
 export type SenderType = 'client' | 'agent' | 'bot' | 'system';
 export type Priority = 'low' | 'normal' | 'high' | 'urgent';
 
+/** Raw API role from Nest/Prisma (`ADMIN` | `OPERATOR` | `SUPERVISOR`). */
+export type ApiUserRole = 'ADMIN' | 'OPERATOR' | 'SUPERVISOR' | string;
+
 export interface Profile {
   id: string;
   name: string;
   email: string | null;
   role: UserRole;
+  /** Unmapped API role — use for admin-only gates (e.g. wallpaper). */
+  apiRole: ApiUserRole;
   department: Department;
   sectorId?: string | null;
   max_concurrent_chats: number;
@@ -66,6 +71,8 @@ export interface Message {
   media_url: string | null;
   media_name: string | null;
   is_deleted: boolean;
+  deleted_by_client: boolean;
+  is_edited: boolean;
   original_body: string | null;
   whatsapp_delivered: boolean;
   whatsapp_message_id: string | null;
@@ -121,6 +128,13 @@ export interface AutoMessageSettings {
   nps_question: string;
   nps_active: boolean;
   updated_at: string;
+}
+
+export interface AppearanceSettings {
+  id: string;
+  wallpaperKey: string;
+  customImageUrl: string | null;
+  updatedAt: string;
 }
 
 export interface WhatsappConnection {

@@ -3,6 +3,7 @@ import { api } from '../lib/api';
 import { connectSocket, getSocket } from '../lib/socket';
 import {
   mapAutoSettings,
+  mapAppearanceSettings,
   mapCanned,
   mapContact,
   mapMessage,
@@ -20,6 +21,7 @@ import type {
   Profile,
   CannedResponse,
   AutoMessageSettings,
+  AppearanceSettings,
   WhatsappConnection,
   NpsRating,
   ScheduledMessage,
@@ -80,9 +82,11 @@ export function useTickets(_filter?: { status?: string; department?: string; ass
         const merged = {
           ...existing,
           ...mapped,
-          contact: existing.contact ?? mapped.contact,
-          assigned_agent: existing.assigned_agent ?? mapped.assigned_agent,
-          tags: existing.tags?.length ? existing.tags : mapped.tags,
+          contact: mapped.contact
+            ? { ...existing.contact, ...mapped.contact }
+            : existing.contact,
+          assigned_agent: mapped.assigned_agent ?? existing.assigned_agent,
+          tags: mapped.tags?.length ? mapped.tags : existing.tags,
         };
         const next = [...prev];
         next.splice(idx, 1);
@@ -164,10 +168,23 @@ export function useMessages(ticketId: string | null) {
     socket.on('message.created', onMessage);
     socket.on('new_message', onMessage);
 
+    const onMessageUpdated = (payload: { message?: any; ticket?: any }) => {
+      const raw = payload?.message;
+      if (!raw) return;
+      const ticketMatch = raw.ticketId === ticketId || payload?.ticket?.id === ticketId;
+      if (!ticketMatch) return;
+      const mapped = mapMessage(raw);
+      setMessages((prev) =>
+        prev.map((m) => (m.id === mapped.id ? { ...mapped, _localStatus: m._localStatus } : m)),
+      );
+    };
+    socket.on('message.updated', onMessageUpdated);
+
     return () => {
       socket.emit('leaveTicket', ticketId);
       socket.off('message.created', onMessage);
       socket.off('new_message', onMessage);
+      socket.off('message.updated', onMessageUpdated);
     };
   }, [ticketId]);
 
@@ -207,6 +224,12 @@ export function useMessages(ticketId: string | null) {
     setMessages((prev) => prev.filter((m) => m.id !== tempId));
   }, []);
 
+  const updateMessage = useCallback((message: Message) => {
+    setMessages((prev) =>
+      prev.map((m) => (m.id === message.id ? { ...message, _localStatus: undefined } : m)),
+    );
+  }, []);
+
   return {
     messages,
     loading,
@@ -214,6 +237,7 @@ export function useMessages(ticketId: string | null) {
     replaceOptimistic,
     failOptimistic,
     removeOptimistic,
+    updateMessage,
   };
 }
 
@@ -355,6 +379,62 @@ export function useAutoMessageSettings() {
     refetch();
   }, [refetch]);
   return { settings, loading, refetch };
+}
+
+export function useAppearanceSettings() {
+  const [settings, setSettings] = useState<AppearanceSettings | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  const refetch = useCallback(async () => {
+    try {
+      const data = await api<any>('/appearance-settings');
+      setSettings(data ? mapAppearanceSettings(data) : null);
+    } catch (err) {
+      console.error('Error fetching appearance settings:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const update = useCallback(
+    async (payload: { wallpaperKey: string; customImageUrl?: string | null }) => {
+      setSaving(true);
+      try {
+        const data = await api<any>('/appearance-settings', {
+          method: 'PUT',
+          body: JSON.stringify(payload),
+        });
+        const mapped = mapAppearanceSettings(data);
+        setSettings(mapped);
+        return mapped;
+      } finally {
+        setSaving(false);
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    refetch();
+  }, [refetch]);
+
+  useEffect(() => {
+    const socket = getSocket() ?? connectSocket();
+    const onUpdated = (payload: { settings?: unknown }) => {
+      if (payload?.settings) {
+        setSettings(mapAppearanceSettings(payload.settings));
+      } else {
+        void refetch();
+      }
+    };
+    socket.on('appearance.updated', onUpdated);
+    return () => {
+      socket.off('appearance.updated', onUpdated);
+    };
+  }, [refetch]);
+
+  return { settings, loading, saving, refetch, update };
 }
 
 export function useWhatsappConnection() {

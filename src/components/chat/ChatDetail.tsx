@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   useProfiles,
@@ -9,6 +10,7 @@ import { departmentLabel, mapMessage, toApiMediaType } from '../../lib/mappers';
 import { useAuth } from '../../context/AuthContext';
 import type { Ticket, Message, Tag, Profile, MessageType } from '../../types';
 import { ContactAvatar } from '../ContactAvatar';
+import { ChatHeader } from './ChatHeader';
 import { MessageBubble } from './MessageBubble';
 import { MessageComposer } from './MessageComposer';
 import { MediaPreview } from './MediaPreview';
@@ -26,7 +28,7 @@ import {
   ChevronDown,
   Bot,
   PauseCircle,
-  Palette,
+  Settings,
   Upload,
   Eye,
 } from 'lucide-react';
@@ -41,8 +43,13 @@ interface ChatDetailProps {
   onTagApplied: () => void;
   allTags: Tag[];
   wallpaperClassName: string;
+  wallpaperStyle?: CSSProperties;
   wallpaperId: string;
+  customImageUrl?: string | null;
+  canEditWallpaper: boolean;
+  wallpaperSaving?: boolean;
   onWallpaperChange: (id: string) => void;
+  onCustomWallpaper: (url: string) => void;
 }
 
 export function ChatDetail({
@@ -53,8 +60,13 @@ export function ChatDetail({
   onTagApplied,
   allTags,
   wallpaperClassName,
+  wallpaperStyle,
   wallpaperId,
+  customImageUrl,
+  canEditWallpaper,
+  wallpaperSaving,
   onWallpaperChange,
+  onCustomWallpaper,
 }: ChatDetailProps) {
   const { profile } = useAuth();
   const {
@@ -63,6 +75,7 @@ export function ChatDetail({
     appendOptimistic,
     replaceOptimistic,
     failOptimistic,
+    updateMessage,
   } = useMessages(ticket.id);
   const { profiles } = useProfiles();
   const { canned } = useCannedResponses();
@@ -167,6 +180,8 @@ export function ChatDetail({
         media_url: partial.media_url ?? null,
         media_name: partial.media_name ?? null,
         is_deleted: false,
+        deleted_by_client: false,
+        is_edited: false,
         original_body: null,
         whatsapp_delivered: false,
         whatsapp_message_id: null,
@@ -215,6 +230,19 @@ export function ChatDetail({
       }
     },
     [appendOptimistic, failOptimistic, replaceOptimistic, ticket.id, profile],
+  );
+
+  const handleEditMessage = useCallback(
+    async (message: Message, body: string) => {
+      const data = await api<any>(`/messages/${message.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ body, isEdited: true }),
+      });
+      const mapped = mapMessage(data?.message ?? data);
+      if (message.sender) mapped.sender = message.sender;
+      updateMessage(mapped);
+    },
+    [updateMessage],
   );
 
   const handleSendText = async (body: string) => {
@@ -380,7 +408,9 @@ export function ChatDetail({
   };
 
   const isAssignedToMe = ticket.assigned_to === profile?.id;
-  const canInteract = ticket.status !== 'finished' && (isAssignedToMe || ticket.status === 'triage');
+  const isFinished = ticket.status === 'finished';
+  const canInteract = !isFinished && isAssignedToMe;
+  const needsAssume = !isFinished && !ticket.assigned_to;
   const isMirrorMode =
     profile?.role === 'admin' &&
     !!ticket.assigned_to &&
@@ -452,98 +482,67 @@ export function ChatDetail({
       )}
 
       {/* Chat header */}
-      <div className="p-3 border-b border-ink-700 bg-ink-900 flex items-center gap-3 relative">
-        <div className="relative">
-          <ContactAvatar
-            name={ticket.contact?.name}
-            profilePicUrl={ticket.contact?.profile_pic_url}
-            size="md"
-            className="!w-10 !h-10"
-          />
-          <span
-            className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-ink-900 ${
-              ticket.status === 'triage'
-                ? 'bg-warning-500'
-                : ticket.status === 'attending'
-                  ? 'bg-brand-500'
-                  : 'bg-ink-500'
-            }`}
-          />
-        </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-white truncate">{ticket.contact?.name}</p>
-          <p className="text-xs text-ink-300 flex items-center gap-1.5 flex-wrap">
-            {ticket.contact?.phone}
-            <span className="text-ink-500">·</span>
-            <span className="text-brand-400">{departmentLabel(ticket.department)}</span>
-            {ticket.assigned_agent && (
-              <>
-                <span className="text-ink-500">·</span>
-                <span className="inline-flex items-center gap-1.5 min-w-0">
-                  <ContactAvatar
-                    name={ticket.assigned_agent.name}
-                    profilePicUrl={ticket.assigned_agent.avatar_url}
-                    size="sm"
-                    className="!w-4 !h-4 !text-[8px]"
-                  />
-                  <span className="truncate">{ticket.assigned_agent.name}</span>
-                </span>
-              </>
+      <ChatHeader
+        ticket={ticket}
+        actions={
+          <div className="flex items-center gap-1">
+            {ticket.bot_paused && (
+              <span
+                className="hidden sm:inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md bg-warning-500/15 text-warning-400"
+                title="Bot pausado neste ticket"
+              >
+                <PauseCircle className="w-3.5 h-3.5" />
+                Bot pausado
+              </span>
             )}
-          </p>
-        </div>
-
-        <div className="flex items-center gap-1">
-          {ticket.bot_paused && (
-            <span
-              className="hidden sm:inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md bg-warning-500/15 text-warning-400"
-              title="Bot pausado neste ticket"
+            {needsAssume && (
+              <button onClick={onAssign} className="btn-primary text-xs px-3 py-1.5">
+                Assumir Atendimento
+              </button>
+            )}
+            {canInteract && ticket.status === 'attending' && (
+              <button onClick={onFinish} className="btn-secondary text-xs px-3 py-1.5 text-success-500">
+                <CheckCircle className="w-3.5 h-3.5" />
+                Finalizar
+              </button>
+            )}
+            {canEditWallpaper && (
+              <button
+                onClick={() => {
+                  setShowWallpaperPicker(!showWallpaperPicker);
+                  setShowActionsMenu(false);
+                }}
+                className={`btn-ghost p-1.5 ${showWallpaperPicker ? 'text-brand-400' : ''}`}
+                title="Papel de parede"
+              >
+                <Settings className="w-4 h-4" />
+              </button>
+            )}
+            <button
+              onClick={() => {
+                setShowActionsMenu(!showActionsMenu);
+                setShowWallpaperPicker(false);
+              }}
+              className="btn-ghost p-1.5"
+              title="Mais ações"
             >
-              <PauseCircle className="w-3.5 h-3.5" />
-              Bot pausado
-            </span>
-          )}
-          {ticket.status === 'triage' && (
-            <button onClick={onAssign} className="btn-primary text-xs px-3 py-1.5">
-              Assumir Atendimento
+              <MoreVertical className="w-4 h-4" />
             </button>
-          )}
-          {canInteract && ticket.status === 'attending' && (
-            <button onClick={onFinish} className="btn-secondary text-xs px-3 py-1.5 text-success-500">
-              <CheckCircle className="w-3.5 h-3.5" />
-              Finalizar
-            </button>
-          )}
-          <button
-            onClick={() => {
-              setShowWallpaperPicker(!showWallpaperPicker);
-              setShowActionsMenu(false);
-            }}
-            className={`btn-ghost p-1.5 ${showWallpaperPicker ? 'text-brand-400' : ''}`}
-            title="Tema de fundo"
-          >
-            <Palette className="w-4 h-4" />
-          </button>
-          <button
-            onClick={() => {
-              setShowActionsMenu(!showActionsMenu);
-              setShowWallpaperPicker(false);
-            }}
-            className="btn-ghost p-1.5"
-            title="Mais ações"
-          >
-            <MoreVertical className="w-4 h-4" />
-          </button>
-        </div>
-
-        {showWallpaperPicker && (
-          <WallpaperPicker
-            selectedId={wallpaperId}
-            onSelect={onWallpaperChange}
-            onClose={() => setShowWallpaperPicker(false)}
-          />
-        )}
-      </div>
+          </div>
+        }
+        extras={
+          canEditWallpaper && showWallpaperPicker ? (
+            <WallpaperPicker
+              selectedId={wallpaperId}
+              customImageUrl={customImageUrl}
+              saving={wallpaperSaving}
+              onSelect={onWallpaperChange}
+              onCustomUploaded={onCustomWallpaper}
+              onClose={() => setShowWallpaperPicker(false)}
+            />
+          ) : null
+        }
+      />
 
       {isMirrorMode && (
         <div className="px-3 py-1.5 border-b border-ink-700 bg-ink-800/80 flex items-center gap-2 text-xs text-ink-300">
@@ -599,20 +598,24 @@ export function ChatDetail({
             </button>
             <button
               onClick={() => {
+                if (!canInteract) return;
                 setShowNote(true);
                 setShowActionsMenu(false);
               }}
-              className="w-full flex items-center gap-2 px-2.5 py-2 rounded-md hover:bg-ink-700 text-sm text-ink-100"
+              disabled={!canInteract}
+              className="w-full flex items-center gap-2 px-2.5 py-2 rounded-md hover:bg-ink-700 text-sm text-ink-100 disabled:opacity-40 disabled:pointer-events-none"
             >
               <StickyNote className="w-4 h-4 text-warning-400" />
               Adicionar Nota Interna
             </button>
             <button
               onClick={() => {
+                if (!canInteract) return;
                 setShowSchedule(true);
                 setShowActionsMenu(false);
               }}
-              className="w-full flex items-center gap-2 px-2.5 py-2 rounded-md hover:bg-ink-700 text-sm text-ink-100"
+              disabled={!canInteract}
+              className="w-full flex items-center gap-2 px-2.5 py-2 rounded-md hover:bg-ink-700 text-sm text-ink-100 disabled:opacity-40 disabled:pointer-events-none"
             >
               <Calendar className="w-4 h-4 text-brand-400" />
               Agendar Mensagem
@@ -779,6 +782,7 @@ export function ChatDetail({
           ref={scrollRef}
           onScroll={handleScroll}
           className={`h-full overflow-y-auto p-4 space-y-1.5 ${wallpaperClassName}`}
+          style={wallpaperStyle}
         >
           {msgLoading ? (
             <div className="flex justify-center py-8">
@@ -800,6 +804,7 @@ export function ChatDetail({
                     message={msg}
                     contactName={ticket.contact?.name}
                     onReply={canInteract ? setReplyingTo : undefined}
+                    onEdit={canInteract ? handleEditMessage : undefined}
                   />
                 </div>
               );
@@ -818,6 +823,18 @@ export function ChatDetail({
             Novas mensagens
           </button>
         )}
+
+        {needsAssume && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
+            <button
+              type="button"
+              onClick={onAssign}
+              className="pointer-events-auto btn-primary text-sm px-5 py-2.5 shadow-xl"
+            >
+              Assumir Conversa
+            </button>
+          </div>
+        )}
       </div>
 
       {fileError && (
@@ -825,9 +842,17 @@ export function ChatDetail({
       )}
 
       {/* Input area */}
-      {canInteract ? (
-        <div>
-          {(showNote || showSchedule) && (
+      {isFinished ? (
+        <div className="border-t border-ink-700 bg-ink-900 p-4 text-center text-sm text-ink-300">
+          Este ticket foi finalizado. Inicie uma nova conversa na agenda de contatos para reabrir o atendimento.
+        </div>
+      ) : isMirrorMode ? (
+        <div className="border-t border-ink-700 bg-ink-900 p-4 text-center text-sm text-ink-300">
+          Modo leitura — assuma ou transfira o atendimento para responder.
+        </div>
+      ) : (
+        <div className={canInteract ? undefined : 'opacity-60'}>
+          {(showNote || showSchedule) && canInteract && (
             <div className="border-t border-ink-700 bg-ink-900 px-3 pt-3">
               {showNote && <NoteInput onSave={handleAddNote} onCancel={() => setShowNote(false)} />}
               {showSchedule && (
@@ -837,20 +862,20 @@ export function ChatDetail({
           )}
           <MessageComposer
             contactName={ticket.contact?.name}
-            replyingTo={replyingTo}
+            replyingTo={canInteract ? replyingTo : null}
             onCancelReply={() => setReplyingTo(null)}
             onSendText={handleSendText}
             onPickFiles={enqueueFiles}
             onSendAudio={handleSendAudio}
             canned={canned}
             uploading={uploading}
+            disabled={!canInteract}
+            placeholder={
+              canInteract
+                ? 'Digite uma mensagem... (use / para respostas rápidas)'
+                : 'Assuma a conversa para responder'
+            }
           />
-        </div>
-      ) : (
-        <div className="border-t border-ink-700 bg-ink-900 p-4 text-center text-sm text-ink-300">
-          {ticket.status === 'finished'
-            ? 'Este ticket foi finalizado. Inicie uma nova conversa na agenda de contatos para reabrir o atendimento.'
-            : 'Clique em "Assumir Atendimento" para iniciar a conversa com este cliente.'}
         </div>
       )}
     </div>
