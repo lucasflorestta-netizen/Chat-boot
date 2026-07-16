@@ -32,7 +32,7 @@ export function AutoMessagesView() {
           greetingMessage: form.greeting_message,
           botMenuActive: form.bot_menu_active,
           botMenuMessage: form.bot_menu_message,
-          takeoverMessage: 'Conversa assumida pelo {{agente}}',
+          takeoverMessage: form.takeover_message,
           closingMessage: form.closing_message,
           npsQuestion: form.nps_question,
           npsActive: form.nps_active,
@@ -100,10 +100,17 @@ export function AutoMessagesView() {
               </div>
             </div>
             <button
+              type="button"
+              role="switch"
+              aria-checked={form.bot_menu_active}
               onClick={() => setForm({ ...form, bot_menu_active: !form.bot_menu_active })}
-              className={`relative w-12 h-6 shrink-0 rounded-full transition-colors ${form.bot_menu_active ? 'bg-success-500' : 'bg-ink-600'}`}
+              className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${form.bot_menu_active ? 'bg-success-500' : 'bg-ink-600'}`}
             >
-              <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full transition-transform ${form.bot_menu_active ? 'translate-x-6' : 'translate-x-0.5'}`} />
+              <span
+                className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
+                  form.bot_menu_active ? 'translate-x-5' : 'translate-x-0'
+                }`}
+              />
             </button>
           </div>
         </div>
@@ -132,7 +139,6 @@ export function AutoMessagesView() {
               onChange={(e) => setForm({ ...form, bot_menu_message: e.target.value })}
               rows={4}
               className="input resize-none"
-              disabled={!form.bot_menu_active}
             />
             <p className="mt-2 text-xs text-ink-300">
               Use o formato: &quot;Digite 1 para Suporte ou 2 para Vendas&quot;. O sistema reconhece os números automaticamente.
@@ -144,9 +150,13 @@ export function AutoMessagesView() {
             title="Mensagem de Assumir Atendimento"
             description="Enviada automaticamente quando um agente assume o ticket. O nome do atendente é inserido no lugar de {{agente}}."
           >
-            <p className="rounded-lg border border-ink-700 bg-ink-800 px-3 py-2.5 text-sm text-ink-100">
-              Conversa assumida pelo {'{{agente}}'}
-            </p>
+            <textarea
+              value={form.takeover_message}
+              onChange={(e) => setForm({ ...form, takeover_message: e.target.value })}
+              rows={3}
+              className="input resize-none"
+              placeholder="Conversa assumida pelo {{agente}}"
+            />
           </SettingCard>
 
           <SettingCard
@@ -171,10 +181,17 @@ export function AutoMessagesView() {
           <div className="mb-3 flex items-center justify-between">
             <span className="text-sm text-ink-200">Ativar pesquisa NPS</span>
             <button
+              type="button"
+              role="switch"
+              aria-checked={form.nps_active}
               onClick={() => setForm({ ...form, nps_active: !form.nps_active })}
-              className={`relative w-12 h-6 rounded-full transition-colors ${form.nps_active ? 'bg-success-500' : 'bg-ink-600'}`}
+              className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${form.nps_active ? 'bg-success-500' : 'bg-ink-600'}`}
             >
-              <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full transition-transform ${form.nps_active ? 'translate-x-6' : 'translate-x-0.5'}`} />
+              <span
+                className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
+                  form.nps_active ? 'translate-x-5' : 'translate-x-0'
+                }`}
+              />
             </button>
           </div>
           <textarea
@@ -182,7 +199,6 @@ export function AutoMessagesView() {
             onChange={(e) => setForm({ ...form, nps_question: e.target.value })}
             rows={2}
             className="input resize-none"
-            disabled={!form.nps_active}
           />
         </SettingCard>
 

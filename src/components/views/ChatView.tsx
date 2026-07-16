@@ -143,6 +143,13 @@ export function ChatView({ preselectedTicketId, onConsumePreselect, onSelectedTi
     await api(`/tickets/${ticket.id}/finish`, { method: 'PATCH' });
   };
 
+  const handleFinishSilent = async (ticket: Ticket) => {
+    await api(`/tickets/${ticket.id}/finish`, {
+      method: 'PATCH',
+      body: JSON.stringify({ silent: true }),
+    });
+  };
+
   const handleTransfer = async (
     ticket: Ticket,
     agentId: string | null,
@@ -284,6 +291,9 @@ export function ChatView({ preselectedTicketId, onConsumePreselect, onSelectedTi
           }}
           onFinish={() => {
             void handleFinish(selectedTicket);
+          }}
+          onFinishSilent={() => {
+            void handleFinishSilent(selectedTicket);
           }}
           onTransfer={(agentId: string | null, options?: { notifyCustomer: boolean }) => {
             void handleTransfer(selectedTicket, agentId, options);

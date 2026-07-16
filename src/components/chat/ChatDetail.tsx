@@ -29,6 +29,7 @@ import {
   Settings,
   Upload,
   Eye,
+  VolumeX,
 } from 'lucide-react';
 
 const NEAR_BOTTOM_PX = 120;
@@ -37,6 +38,7 @@ interface ChatDetailProps {
   ticket: Ticket;
   onAssign: () => void;
   onFinish: () => void;
+  onFinishSilent: () => void;
   onTransfer: (agentId: string | null, options?: { notifyCustomer: boolean }) => void;
   onTagApplied: () => void;
   allTags: Tag[];
@@ -54,6 +56,7 @@ export function ChatDetail({
   ticket,
   onAssign,
   onFinish,
+  onFinishSilent,
   onTransfer,
   onTagApplied,
   allTags,
@@ -585,6 +588,18 @@ export function ChatDetail({
               >
                 <CheckCircle className="w-4 h-4" />
                 Finalizar Ticket
+              </button>
+            )}
+            {ticket.status !== 'finished' && profile?.apiRole === 'ADMIN' && (
+              <button
+                onClick={() => {
+                  onFinishSilent();
+                  setShowActionsMenu(false);
+                }}
+                className="w-full flex items-center gap-2 px-2.5 py-2 rounded-md hover:bg-ink-700 text-sm text-danger-400"
+              >
+                <VolumeX className="w-4 h-4" />
+                Finalizar em silêncio
               </button>
             )}
           </div>
