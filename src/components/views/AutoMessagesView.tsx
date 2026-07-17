@@ -3,7 +3,7 @@ import { useAutoMessageSettings } from '../../hooks/useData';
 import { api } from '../../lib/api';
 import { mapAutoSettings } from '../../lib/mappers';
 import type { AutoMessageSettings } from '../../types';
-import { Save, Loader2, MessageSquare, Bot, UserCheck, CheckCircle, Star, Power, Check, AlertCircle, Moon } from 'lucide-react';
+import { Save, Loader2, MessageSquare, Bot, UserCheck, CheckCircle, Star, Power, Check, AlertCircle, Moon, Clock } from 'lucide-react';
 
 export function AutoMessagesView() {
   const { settings, loading, refetch } = useAutoMessageSettings();
@@ -23,6 +23,31 @@ export function AutoMessagesView() {
 
   const handleSave = async () => {
     if (!form) return;
+
+    const warnMin = Number(form.inactivity_warning_minutes);
+    const closeMin = Number(form.inactivity_closing_minutes);
+    if (!Number.isInteger(warnMin) || warnMin < 1) {
+      setFeedback({
+        type: 'error',
+        message: 'O tempo do aviso de inatividade deve ser um número inteiro maior que zero.',
+      });
+      return;
+    }
+    if (!Number.isInteger(closeMin) || closeMin < 1) {
+      setFeedback({
+        type: 'error',
+        message: 'O tempo de encerramento por inatividade deve ser um número inteiro maior que zero.',
+      });
+      return;
+    }
+    if (closeMin <= warnMin) {
+      setFeedback({
+        type: 'error',
+        message: 'O encerramento por inatividade deve ocorrer depois do aviso.',
+      });
+      return;
+    }
+
     setSaving(true);
     setFeedback(null);
     try {
@@ -37,6 +62,11 @@ export function AutoMessagesView() {
           npsQuestion: form.nps_question,
           npsActive: form.nps_active,
           afterHoursMessage: form.after_hours_message,
+          inactivityEnabled: form.inactivity_enabled,
+          inactivityWarningMessage: form.inactivity_warning_message,
+          inactivityWarningMinutes: warnMin,
+          inactivityClosingMessage: form.inactivity_closing_message,
+          inactivityClosingMinutes: closeMin,
         }),
       });
       if (data) setForm(mapAutoSettings(data));
@@ -187,6 +217,115 @@ export function AutoMessagesView() {
             />
           </SettingCard>
         </div>
+
+        <SettingCard
+          icon={<Clock className="w-5 h-5" />}
+          title="Inatividade do cliente"
+          description="Quando o cliente demora para responder após a última mensagem do atendente, o sistema envia um aviso e depois encerra o ticket."
+        >
+          <div className="mb-4 flex items-center justify-between">
+            <span className="text-sm text-ink-200">Ativar encerramento por inatividade</span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={form.inactivity_enabled}
+              onClick={() =>
+                setForm({ ...form, inactivity_enabled: !form.inactivity_enabled })
+              }
+              className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${
+                form.inactivity_enabled ? 'bg-success-500' : 'bg-ink-600'
+              }`}
+            >
+              <span
+                className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
+                  form.inactivity_enabled ? 'translate-x-5' : 'translate-x-0'
+                }`}
+              />
+            </button>
+          </div>
+
+          <div
+            className={`grid grid-cols-1 gap-4 md:grid-cols-2 ${
+              form.inactivity_enabled ? '' : 'pointer-events-none opacity-50'
+            }`}
+          >
+            <div className="space-y-3">
+              <div>
+                <label className="mb-1.5 block text-sm text-ink-200">Mensagem de aviso</label>
+                <textarea
+                  value={form.inactivity_warning_message}
+                  onChange={(e) =>
+                    setForm({ ...form, inactivity_warning_message: e.target.value })
+                  }
+                  rows={3}
+                  className="input resize-none"
+                  disabled={!form.inactivity_enabled}
+                  placeholder="Ainda está aí? Não tivemos retorno, em breve o atendimento será encerrado."
+                />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-sm text-ink-200">
+                  Enviar aviso após (minutos)
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={1440}
+                  value={form.inactivity_warning_minutes}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      inactivity_warning_minutes: Number(e.target.value),
+                    })
+                  }
+                  className="input"
+                  disabled={!form.inactivity_enabled}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="mb-1.5 block text-sm text-ink-200">
+                  Mensagem de encerramento
+                </label>
+                <textarea
+                  value={form.inactivity_closing_message}
+                  onChange={(e) =>
+                    setForm({ ...form, inactivity_closing_message: e.target.value })
+                  }
+                  rows={3}
+                  className="input resize-none"
+                  disabled={!form.inactivity_enabled}
+                  placeholder="Encerramos seu atendimento por inatividade. Obrigado!"
+                />
+                <p className="mt-2 text-xs text-ink-300">
+                  Opcional: use {'{{protocol}}'} no texto. O link do formulário de satisfação
+                  continua sendo anexado automaticamente quando configurado no servidor.
+                </p>
+              </div>
+              <div>
+                <label className="mb-1.5 block text-sm text-ink-200">
+                  Encerrar atendimento após (minutos)
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={1440}
+                  value={form.inactivity_closing_minutes}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      inactivity_closing_minutes: Number(e.target.value),
+                    })
+                  }
+                  className="input"
+                  disabled={!form.inactivity_enabled}
+                />
+              </div>
+            </div>
+          </div>
+        </SettingCard>
 
         <SettingCard
           icon={<Star className="w-5 h-5" />}

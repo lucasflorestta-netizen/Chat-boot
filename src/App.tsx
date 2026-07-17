@@ -19,8 +19,9 @@ import { api } from './lib/api';
 import { connectSocket } from './lib/socket';
 import { mapMediaType, mapTicket } from './lib/mappers';
 import { TransferAcceptModal } from './components/chat/TransferAcceptModal';
+import { ContactAvatar } from './components/ContactAvatar';
 import type { Ticket } from './types';
-import { Loader2, Bell } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 
 const TOAST_BODY_MAX = 120;
 
@@ -84,7 +85,7 @@ function AppContent() {
   const [transferBusy, setTransferBusy] = useState(false);
   const selectedTicketIdRef = useRef<string | null>(null);
   const activeTabRef = useRef<TabId>('chat');
-  const { notifications, notify, soundEnabled, setSoundEnabled } = useNotifications();
+  const { notifications, notify, dismiss, soundEnabled, setSoundEnabled } = useNotifications();
   const { tickets } = useTickets();
   const ticketsRef = useRef(tickets);
   ticketsRef.current = tickets;
@@ -137,6 +138,11 @@ function AppContent() {
         'ticket',
         'Transferência recebida',
         `${fromName} quer transferir ${contactName} para você`,
+        {
+          avatarUrl: ticket.contact?.profile_pic_url ?? null,
+          ticketId: ticket.id,
+          label: 'HelpDesk',
+        },
       );
     };
 
@@ -223,7 +229,11 @@ function AppContent() {
 
       const listed = ticketsRef.current.find((t) => t.id === tid);
       const contactName = listed?.contact?.name?.trim() || 'Cliente';
-      notify('message', contactName, previewClientMessage(message));
+      notify('message', contactName, previewClientMessage(message), {
+        avatarUrl: listed?.contact?.profile_pic_url ?? null,
+        ticketId: tid,
+        label: 'WhatsApp',
+      });
     };
 
     const onInternal = (payload: {
@@ -231,7 +241,12 @@ function AppContent() {
         senderId?: string;
         body?: string | null;
         type?: string | null;
-        sender?: { name?: string | null; username?: string };
+        sender?: {
+          name?: string | null;
+          username?: string;
+          avatarUrl?: string | null;
+          avatar_url?: string | null;
+        };
       };
     }) => {
       const message = payload?.message;
@@ -245,7 +260,10 @@ function AppContent() {
         message.sender?.name?.trim() ||
         message.sender?.username ||
         'Comunicador Interno';
-      notify('message', title, previewInternalMessage(message));
+      notify('message', title, previewInternalMessage(message), {
+        avatarUrl: message.sender?.avatarUrl ?? message.sender?.avatar_url ?? null,
+        label: 'Comunicador',
+      });
       void refreshInternalUnread();
     };
 
@@ -311,6 +329,16 @@ function AppContent() {
     setActiveTab('chat');
   };
 
+  const handleToastClick = (n: (typeof notifications)[number]) => {
+    if (n.ticketId) {
+      setPreselectedTicket(n.ticketId);
+      setActiveTab('chat');
+    } else if (n.label === 'Comunicador') {
+      setActiveTab('comunicador-interno');
+    }
+    dismiss(n.id);
+  };
+
   const notificationBell = notifications.length > 0 && (
     <span className="absolute -top-1 -right-1 w-4 h-4 bg-danger-500 rounded-full flex items-center justify-center text-[10px] text-white">
       {notifications.length}
@@ -359,15 +387,31 @@ function AppContent() {
         {activeTab === 'grupos' && profile.role === 'admin' && <GroupsView />}
       </main>
 
-      <div className="fixed bottom-4 right-4 space-y-2 z-50">
+      <div className="fixed bottom-4 right-4 space-y-3 z-50">
         {notifications.map((n) => (
-          <div key={n.id} className="card p-3 shadow-2xl animate-slide-in flex items-start gap-2 max-w-xs bg-ink-800">
-            <Bell className="w-4 h-4 text-brand-400 flex-shrink-0 mt-0.5" />
-            <div>
-              <p className="text-sm font-medium text-white">{n.title}</p>
-              <p className="text-xs text-ink-300">{n.body}</p>
+          <button
+            key={n.id}
+            type="button"
+            onClick={() => handleToastClick(n)}
+            className="w-[360px] max-w-[calc(100vw-2rem)] rounded-xl bg-white shadow-[0_8px_30px_rgba(0,0,0,0.28)] animate-slide-in flex items-start gap-3 p-4 text-left hover:bg-gray-50 transition-colors cursor-pointer border border-black/5"
+          >
+            <ContactAvatar
+              name={n.title}
+              profilePicUrl={n.avatarUrl}
+              size="md"
+            />
+            <div className="min-w-0 flex-1 pt-0.5">
+              <p className="text-[11px] font-medium text-[#25D366] leading-none mb-1">
+                {n.label ?? (n.type === 'ticket' ? 'HelpDesk' : 'WhatsApp')}
+              </p>
+              <p className="text-[15px] font-semibold text-gray-900 truncate leading-tight">
+                {n.title}
+              </p>
+              <p className="text-[13px] text-gray-500 line-clamp-2 mt-0.5 leading-snug">
+                {n.body}
+              </p>
             </div>
-          </div>
+          </button>
         ))}
       </div>
     </div>

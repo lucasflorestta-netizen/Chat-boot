@@ -1,12 +1,21 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
-type NotificationType = 'message' | 'ticket';
+export type NotificationType = 'message' | 'ticket';
 
-interface AppNotification {
+export interface AppNotification {
   id: string;
   type: NotificationType;
   title: string;
   body: string;
+  avatarUrl?: string | null;
+  ticketId?: string | null;
+  label?: string;
+}
+
+export interface NotifyOptions {
+  avatarUrl?: string | null;
+  ticketId?: string | null;
+  label?: string;
 }
 
 let counter = 0;
@@ -15,6 +24,10 @@ export function useNotifications() {
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const audioCtxRef = useRef<AudioContext | null>(null);
+
+  const dismiss = useCallback((id: string) => {
+    setNotifications((prev) => prev.filter((n) => n.id !== id));
+  }, []);
 
   const playSound = (type: NotificationType) => {
     if (!soundEnabled) return;
@@ -38,17 +51,33 @@ export function useNotifications() {
     }
   };
 
-  const notify = (type: NotificationType, title: string, body: string) => {
-    const id = `notif-${++counter}`;
-    setNotifications((prev) => [...prev, { id, type, title, body }]);
-    playSound(type);
-    if (Notification.permission === 'granted') {
-      new Notification(title, { body });
-    }
-    setTimeout(() => {
-      setNotifications((prev) => prev.filter((n) => n.id !== id));
-    }, 5000);
-  };
+  const notify = useCallback(
+    (type: NotificationType, title: string, body: string, options?: NotifyOptions) => {
+      const id = `notif-${++counter}`;
+      setNotifications((prev) => [
+        ...prev,
+        {
+          id,
+          type,
+          title,
+          body,
+          avatarUrl: options?.avatarUrl ?? null,
+          ticketId: options?.ticketId ?? null,
+          label: options?.label,
+        },
+      ]);
+      playSound(type);
+      if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+        new Notification(title, { body });
+      }
+      setTimeout(() => {
+        setNotifications((prev) => prev.filter((n) => n.id !== id));
+      }, 5000);
+    },
+    // playSound depends on soundEnabled via closure; keep notify stable enough for effects
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [soundEnabled],
+  );
 
   useEffect(() => {
     if ('Notification' in window && Notification.permission === 'default') {
@@ -56,5 +85,5 @@ export function useNotifications() {
     }
   }, []);
 
-  return { notifications, notify, soundEnabled, setSoundEnabled };
+  return { notifications, notify, dismiss, soundEnabled, setSoundEnabled };
 }

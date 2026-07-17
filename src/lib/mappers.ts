@@ -283,6 +283,22 @@ export function mapAutoSettings(raw: any): AutoMessageSettings {
       raw.businessHoursEnd ?? raw.business_hours_end ?? '18:00',
     operator_lunch_auto_status:
       raw.operatorLunchAutoStatus ?? raw.operator_lunch_auto_status ?? true,
+    inactivity_enabled:
+      raw.inactivityEnabled ?? raw.inactivity_enabled ?? true,
+    inactivity_warning_message:
+      raw.inactivityWarningMessage ??
+      raw.inactivity_warning_message ??
+      'Ainda está aí? Não tivemos retorno, em breve o atendimento será encerrado.',
+    inactivity_warning_minutes: Number(
+      raw.inactivityWarningMinutes ?? raw.inactivity_warning_minutes ?? 13,
+    ),
+    inactivity_closing_message:
+      raw.inactivityClosingMessage ??
+      raw.inactivity_closing_message ??
+      'Encerramos seu atendimento por inatividade. Obrigado!',
+    inactivity_closing_minutes: Number(
+      raw.inactivityClosingMinutes ?? raw.inactivity_closing_minutes ?? 15,
+    ),
     updated_at: iso(raw.updatedAt ?? raw.updated_at),
   };
 }

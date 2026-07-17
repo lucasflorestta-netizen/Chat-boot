@@ -164,6 +164,11 @@ export interface AutoMessageSettings {
   business_hours_end: string;
   /** Offline automático 5 min antes do almoço / Disponível ao terminar. */
   operator_lunch_auto_status: boolean;
+  inactivity_enabled: boolean;
+  inactivity_warning_message: string;
+  inactivity_warning_minutes: number;
+  inactivity_closing_message: string;
+  inactivity_closing_minutes: number;
   updated_at: string;
 }
 

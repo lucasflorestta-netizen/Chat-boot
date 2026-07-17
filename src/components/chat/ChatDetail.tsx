@@ -51,6 +51,7 @@ interface ChatDetailProps {
   wallpaperSaving?: boolean;
   onWallpaperChange: (id: string) => void;
   onCustomWallpaper: (url: string) => void;
+  onDeselect?: () => void;
 }
 
 export function ChatDetail({
@@ -70,6 +71,7 @@ export function ChatDetail({
   wallpaperSaving,
   onWallpaperChange,
   onCustomWallpaper,
+  onDeselect,
 }: ChatDetailProps) {
   const { profile } = useAuth();
   const {
@@ -147,6 +149,69 @@ export function ChatDetail({
     setFileQueue([]);
     setFileError(null);
   }, [ticket.id]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return;
+
+      if (transferTargetId) {
+        e.preventDefault();
+        setTransferTargetId(null);
+        return;
+      }
+      if (showTransfer) {
+        e.preventDefault();
+        setShowTransfer(false);
+        setTransferTargetId(null);
+        return;
+      }
+      if (showTagModal) {
+        e.preventDefault();
+        setShowTagModal(false);
+        return;
+      }
+      if (showActionsMenu) {
+        e.preventDefault();
+        setShowActionsMenu(false);
+        return;
+      }
+      if (showWallpaperPicker) {
+        e.preventDefault();
+        setShowWallpaperPicker(false);
+        return;
+      }
+      if (showNote) {
+        e.preventDefault();
+        setShowNote(false);
+        return;
+      }
+      if (showSchedule) {
+        e.preventDefault();
+        setShowSchedule(false);
+        return;
+      }
+      if (replyingTo) {
+        e.preventDefault();
+        setReplyingTo(null);
+        return;
+      }
+
+      onDeselect?.();
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [
+    onDeselect,
+    transferTargetId,
+    showTransfer,
+    showTagModal,
+    showActionsMenu,
+    showWallpaperPicker,
+    showNote,
+    showSchedule,
+    replyingTo,
+  ]);
 
   const buildOptimistic = useCallback(
     (partial: {

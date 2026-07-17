@@ -325,6 +325,7 @@ export function ChatView({ preselectedTicketId, onConsumePreselect, onSelectedTi
           wallpaperSaving={wallpaperSaving}
           onWallpaperChange={handleWallpaperChange}
           onCustomWallpaper={handleCustomWallpaper}
+          onDeselect={() => setSelectedTicket(null)}
         />
       ) : (
         <div
