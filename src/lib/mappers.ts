@@ -235,6 +235,8 @@ export function mapMessage(raw: any): Message {
       raw.isDeleted ??
       raw.is_deleted ??
       false,
+    deleted_for_client:
+      raw.deletedForClient ?? raw.deleted_for_client ?? false,
     is_edited: raw.isEdited ?? raw.is_edited ?? false,
     original_body: raw.originalBody ?? raw.original_body ?? null,
     whatsapp_delivered: raw.whatsappDelivered ?? raw.whatsapp_delivered ?? false,

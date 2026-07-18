@@ -103,6 +103,7 @@ export interface Message {
   media_name: string | null;
   is_deleted: boolean;
   deleted_by_client: boolean;
+  deleted_for_client: boolean;
   is_edited: boolean;
   original_body: string | null;
   whatsapp_delivered: boolean;

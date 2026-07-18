@@ -232,6 +232,7 @@ export function ChatDetail({
         media_name: partial.media_name ?? null,
         is_deleted: false,
         deleted_by_client: false,
+        deleted_for_client: false,
         is_edited: false,
         original_body: null,
         whatsapp_delivered: false,
@@ -288,6 +289,18 @@ export function ChatDetail({
       const data = await api<any>(`/messages/${message.id}`, {
         method: 'PATCH',
         body: JSON.stringify({ body, isEdited: true }),
+      });
+      const mapped = mapMessage(data?.message ?? data);
+      if (message.sender) mapped.sender = message.sender;
+      updateMessage(mapped);
+    },
+    [updateMessage],
+  );
+
+  const handleDeleteMessage = useCallback(
+    async (message: Message) => {
+      const data = await api<any>(`/messages/${message.id}`, {
+        method: 'DELETE',
       });
       const mapped = mapMessage(data?.message ?? data);
       if (message.sender) mapped.sender = message.sender;
@@ -863,6 +876,7 @@ export function ChatDetail({
                     contactName={ticket.contact?.name}
                     onReply={canInteract ? setReplyingTo : undefined}
                     onEdit={canInteract ? handleEditMessage : undefined}
+                    onDelete={canInteract ? handleDeleteMessage : undefined}
                   />
                 </div>
               );

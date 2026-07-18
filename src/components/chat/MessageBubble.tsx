@@ -7,6 +7,7 @@ import {
   Pencil,
   Reply,
   StickyNote,
+  Trash2,
   X,
 } from 'lucide-react';
 import type { Message } from '../../types';
@@ -19,6 +20,7 @@ interface MessageBubbleProps {
   contactName?: string | null;
   onReply?: (message: Message) => void;
   onEdit?: (message: Message, body: string) => Promise<void>;
+  onDelete?: (message: Message) => Promise<void>;
 }
 
 export function MessageBubble({
@@ -26,16 +28,21 @@ export function MessageBubble({
   contactName,
   onReply,
   onEdit,
+  onDelete,
 }: MessageBubbleProps) {
   const isClient = message.sender_type === 'client';
   const isNote = message.media_type === 'note';
   const isSystem = message.sender_type === 'system' || message.sender_type === 'bot';
   const deletedByClient = message.deleted_by_client || message.is_deleted;
+  const deletedForClient = message.deleted_for_client;
+  const isSoftDeleted = deletedByClient || deletedForClient;
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(message.body ?? '');
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const canReply = Boolean(onReply) && !isNote && !isSystem && !message._localStatus;
   const canEdit =
@@ -43,8 +50,15 @@ export function MessageBubble({
     !isClient &&
     !isNote &&
     !isSystem &&
-    !deletedByClient &&
+    !isSoftDeleted &&
     Boolean(message.body?.trim()) &&
+    !message._localStatus;
+  const canDelete =
+    Boolean(onDelete) &&
+    !isClient &&
+    !isNote &&
+    !isSystem &&
+    !isSoftDeleted &&
     !message._localStatus;
 
   if (isNote) {
@@ -122,6 +136,22 @@ export function MessageBubble({
     }
   };
 
+  const handleDeleteClick = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!onDelete || deleting) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await onDelete(message);
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      console.error('Error deleting message:', err);
+      setDeleteError(errorMsg || 'Falha ao excluir mensagem');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const mediaAndBody = (
     <>
       {message.media_type === 'image' && message.media_url && (
@@ -178,6 +208,18 @@ export function MessageBubble({
     </>
   );
 
+  const softDeleteOverlay = isSoftDeleted ? (
+    <div className="relative">
+      <div className="opacity-60">{mediaAndBody}</div>
+      <div className="mt-2 flex items-center gap-1.5 rounded-md bg-black/35 px-2 py-1.5 text-warning-300">
+        <Eye className="w-3.5 h-3.5 shrink-0" />
+        <span className="text-xs italic">
+          {deletedForClient ? 'Apagada para o cliente' : 'Apagada pelo cliente'}
+        </span>
+      </div>
+    </div>
+  ) : null;
+
   return (
     <>
       <div
@@ -196,6 +238,18 @@ export function MessageBubble({
                   aria-label="Editar"
                 >
                   <Pencil className="w-3.5 h-3.5 text-ink-200" />
+                </button>
+              )}
+              {canDelete && (
+                <button
+                  type="button"
+                  onClick={(e) => void handleDeleteClick(e)}
+                  disabled={deleting}
+                  className="opacity-0 group-hover/row:opacity-100 transition-opacity btn-ghost p-1.5 rounded-full bg-ink-800/80 border border-ink-600 disabled:opacity-40"
+                  title="Excluir para o cliente"
+                  aria-label="Excluir para o cliente"
+                >
+                  <Trash2 className="w-3.5 h-3.5 text-ink-200" />
                 </button>
               )}
               {canReply && (
@@ -284,16 +338,14 @@ export function MessageBubble({
                   <p className="text-[10px] text-danger-300 mt-1.5 break-words">{editError}</p>
                 )}
               </div>
-            ) : deletedByClient ? (
-              <div className="relative">
-                <div className="opacity-60">{mediaAndBody}</div>
-                <div className="mt-2 flex items-center gap-1.5 rounded-md bg-black/35 px-2 py-1.5 text-warning-300">
-                  <Eye className="w-3.5 h-3.5 shrink-0" />
-                  <span className="text-xs italic">Apagada pelo cliente</span>
-                </div>
-              </div>
+            ) : softDeleteOverlay ? (
+              softDeleteOverlay
             ) : (
               mediaAndBody
+            )}
+
+            {deleteError && !editing && (
+              <p className="text-[10px] text-danger-300 mt-1.5 break-words">{deleteError}</p>
             )}
 
             {!editing && (
@@ -310,7 +362,7 @@ export function MessageBubble({
                     />
                   )}
                 </span>
-                {message.is_edited && !deletedByClient && (
+                {message.is_edited && !isSoftDeleted && (
                   <span className="text-[9px] text-white/40 leading-none mt-0.5">editada</span>
                 )}
               </div>

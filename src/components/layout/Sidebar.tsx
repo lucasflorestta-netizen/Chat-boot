@@ -57,7 +57,7 @@ const navItems: NavItem[] = [
   { id: 'tags', label: 'Etiquetas', icon: <Tag className="w-5 h-5" />, adminOnly: true },
   { id: 'canned', label: 'Respostas Rápidas', icon: <Zap className="w-5 h-5" />, adminOnly: true },
   { id: 'comunicador-interno', label: 'Comunicador Interno', icon: <MessageCircleMore className="w-5 h-5" /> },
-  { id: 'grupos', label: 'Grupos', icon: <UsersRound className="w-5 h-5" />, adminOnly: true },
+  { id: 'grupos', label: 'Grupos', icon: <UsersRound className="w-5 h-5" /> },
 ];
 
 interface SidebarProps {

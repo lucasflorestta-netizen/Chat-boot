@@ -72,7 +72,6 @@ const AGENT_BLOCKED_TABS: TabId[] = [
   'users',
   'auto-messages',
   'settings',
-  'grupos',
 ];
 
 function AppContent() {
@@ -384,7 +383,7 @@ function AppContent() {
         {activeTab === 'tags' && profile.role === 'admin' && <TagsView />}
         {activeTab === 'canned' && profile.role === 'admin' && <CannedView />}
         {activeTab === 'comunicador-interno' && <InternalChatView />}
-        {activeTab === 'grupos' && profile.role === 'admin' && <GroupsView />}
+        {activeTab === 'grupos' && <GroupsView />}
       </main>
 
       <div className="fixed bottom-4 right-4 space-y-3 z-50">
