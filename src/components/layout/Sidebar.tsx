@@ -27,7 +27,7 @@ import {
 } from '../../lib/agentStatus';
 import type { AgentStatus } from '../../types';
 import { AvatarUploadButton } from '../AvatarUploadButton';
-import { useWhatsappConnection } from '../../hooks/useData';
+import { useWhatsappConnection } from '../../context/useWhatsappConnection';
 import { NotepadWindow } from '../notepad/NotepadWindow';
 
 export type TabId =
@@ -85,12 +85,18 @@ export function Sidebar({
 }: SidebarProps) {
   const { profile, signOut, refreshProfile, patchProfile } = useAuth();
   const { connection, loading: waLoading } = useWhatsappConnection();
-  const items = navItems.filter((item) => !item.adminOnly || profile?.role === 'admin');
   const [statusSaving, setStatusSaving] = useState(false);
   const [notepadOpen, setNotepadOpen] = useState(false);
   const [notepadMinimized, setNotepadMinimized] = useState(false);
   const isWhatsappDisconnected = !waLoading && connection?.status === 'disconnected';
   const canManageWhatsapp = profile?.role === 'admin';
+  const items = navItems.filter((item) => {
+    if (isWhatsappDisconnected) {
+      if (!canManageWhatsapp) return false;
+      return item.id === 'whatsapp';
+    }
+    return !item.adminOnly || canManageWhatsapp;
+  });
 
   const openNotepad = () => {
     setNotepadOpen(true);
@@ -180,7 +186,7 @@ export function Sidebar({
               <span className="font-semibold text-danger-200">WhatsApp desconectado.</span>
               {canManageWhatsapp
                 ? ' Clique para reconectar.'
-                : ' Avise um administrador.'}
+                : ' Aguarde um administrador reconectar.'}
             </span>
           </button>
         )}

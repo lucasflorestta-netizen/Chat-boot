@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useContacts, useWhatsappConnection } from '../../hooks/useData';
+import { useContacts } from '../../hooks/useData';
+import { useWhatsappConnection } from '../../context/useWhatsappConnection';
 import { api } from '../../lib/api';
 import {
   Search,

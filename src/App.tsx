@@ -1,6 +1,8 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { AuthProvider } from './context/AuthContext';
 import { useAuth } from './context/useAuth';
+import { WhatsappConnectionProvider } from './context/WhatsappConnectionContext';
+import { useWhatsappConnection } from './context/useWhatsappConnection';
 import { AuthScreen } from './components/AuthScreen';
 import { Sidebar, type TabId } from './components/layout/Sidebar';
 import { Dashboard } from './components/views/Dashboard';
@@ -22,7 +24,7 @@ import { mapMediaType, mapTicket } from './lib/mappers';
 import { TransferAcceptModal } from './components/chat/TransferAcceptModal';
 import { ContactAvatar } from './components/ContactAvatar';
 import type { Ticket } from './types';
-import { Loader2 } from 'lucide-react';
+import { Loader2, WifiOff } from 'lucide-react';
 
 const TOAST_BODY_MAX = 120;
 
@@ -77,6 +79,29 @@ const AGENT_BLOCKED_TABS: TabId[] = [
 
 function AppContent() {
   const { session, profile, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-screen bg-ink-950">
+        <Loader2 className="w-8 h-8 animate-spin text-brand-500" />
+      </div>
+    );
+  }
+
+  if (!session || !profile) {
+    return <AuthScreen />;
+  }
+
+  return (
+    <WhatsappConnectionProvider>
+      <AuthenticatedApp />
+    </WhatsappConnectionProvider>
+  );
+}
+
+function AuthenticatedApp() {
+  const { profile } = useAuth();
+  const { connection, loading: waLoading } = useWhatsappConnection();
   const [activeTab, setActiveTab] = useState<TabId>('chat');
   const [preselectedTicket, setPreselectedTicket] = useState<string | null>(null);
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
@@ -91,6 +116,11 @@ function AppContent() {
   ticketsRef.current = tickets;
   selectedTicketIdRef.current = selectedTicketId;
   activeTabRef.current = activeTab;
+
+  const isWhatsappDisconnected = !waLoading && connection?.status === 'disconnected';
+  const isAdmin = profile?.role === 'admin';
+  const lockToWhatsapp = isWhatsappDisconnected && isAdmin;
+  const lockForAgent = isWhatsappDisconnected && !isAdmin;
 
   const handleSelectedTicketChange = useCallback((ticketId: string | null) => {
     setSelectedTicketId(ticketId);
@@ -281,6 +311,12 @@ function AppContent() {
     }
   }, [activeTab, refreshInternalUnread]);
 
+  useEffect(() => {
+    if (lockToWhatsapp && activeTab !== 'whatsapp') {
+      setActiveTab('whatsapp');
+    }
+  }, [lockToWhatsapp, activeTab]);
+
   const unreadCount = useMemo(() => {
     if (!profile) return 0;
     const visible = profile.role === 'admin'
@@ -297,19 +333,11 @@ function AppContent() {
       .reduce((sum, t) => sum + (t.unread_count || 0), 0);
   }, [tickets, profile]);
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-screen bg-ink-950">
-        <Loader2 className="w-8 h-8 animate-spin text-brand-500" />
-      </div>
-    );
-  }
-
-  if (!session || !profile) {
-    return <AuthScreen />;
-  }
+  if (!profile) return null;
 
   const guardedTab = (tab: TabId): TabId => {
+    if (lockToWhatsapp) return 'whatsapp';
+    if (lockForAgent) return tab;
     if (profile.role !== 'admin' && AGENT_BLOCKED_TABS.includes(tab)) {
       return 'chat';
     }
@@ -317,6 +345,7 @@ function AppContent() {
   };
 
   const handleNavigate = (tab: TabId) => {
+    if (lockForAgent) return;
     const next = guardedTab(tab);
     if (next !== 'chat') {
       setSelectedTicketId(null);
@@ -325,11 +354,16 @@ function AppContent() {
   };
 
   const handleStartConversation = (ticketId: string) => {
+    if (isWhatsappDisconnected) return;
     setPreselectedTicket(ticketId);
     setActiveTab('chat');
   };
 
   const handleToastClick = (n: (typeof notifications)[number]) => {
+    if (isWhatsappDisconnected) {
+      dismiss(n.id);
+      return;
+    }
     if (n.ticketId) {
       setPreselectedTicket(n.ticketId);
       setActiveTab('chat');
@@ -347,7 +381,9 @@ function AppContent() {
 
   return (
     <div className="flex h-screen overflow-hidden bg-ink-950">
-      {pendingTransfer && pendingTransfer.pending_transfer_to === profile.id && (
+      {pendingTransfer &&
+        pendingTransfer.pending_transfer_to === profile.id &&
+        !isWhatsappDisconnected && (
         <TransferAcceptModal
           ticket={pendingTransfer}
           busy={transferBusy}
@@ -366,29 +402,53 @@ function AppContent() {
       />
 
       <main className="flex-1 overflow-hidden flex flex-col">
-        {activeTab === 'dashboard' && profile.role === 'admin' && (
-          <Dashboard onNavigateToChat={() => setActiveTab('chat')} />
-        )}
-        {activeTab === 'chat' && (
-          <ChatView
-            preselectedTicketId={preselectedTicket}
-            onConsumePreselect={() => setPreselectedTicket(null)}
-            onSelectedTicketChange={handleSelectedTicketChange}
-          />
-        )}
-        {activeTab === 'contacts' && (
-          <div className="flex-1 min-h-0">
-            <ContactsView onStartConversation={handleStartConversation} />
+        {lockForAgent ? (
+          <div className="flex-1 flex flex-col items-center justify-center gap-4 px-6 text-center">
+            <div className="w-14 h-14 rounded-2xl bg-danger-500/15 border border-danger-500/30 flex items-center justify-center">
+              <WifiOff className="w-7 h-7 text-danger-400" />
+            </div>
+            <div className="space-y-2 max-w-md">
+              <h2 className="text-xl font-semibold text-white">WhatsApp desconectado</h2>
+              <p className="text-sm text-ink-300 leading-relaxed">
+                Aguarde um administrador reconectar
+              </p>
+            </div>
           </div>
+        ) : (
+          <>
+            {activeTab === 'dashboard' && profile.role === 'admin' && (
+              <Dashboard onNavigateToChat={() => setActiveTab('chat')} />
+            )}
+            {activeTab === 'chat' && !lockToWhatsapp && (
+              <ChatView
+                preselectedTicketId={preselectedTicket}
+                onConsumePreselect={() => setPreselectedTicket(null)}
+                onSelectedTicketChange={handleSelectedTicketChange}
+              />
+            )}
+            {activeTab === 'contacts' && !lockToWhatsapp && (
+              <div className="flex-1 min-h-0">
+                <ContactsView onStartConversation={handleStartConversation} />
+              </div>
+            )}
+            {activeTab === 'users' && profile.role === 'admin' && !lockToWhatsapp && (
+              <UsersView />
+            )}
+            {activeTab === 'whatsapp' && profile.role === 'admin' && <WhatsappView />}
+            {activeTab === 'auto-messages' && profile.role === 'admin' && !lockToWhatsapp && (
+              <AutoMessagesView />
+            )}
+            {activeTab === 'settings' && profile.role === 'admin' && !lockToWhatsapp && (
+              <SettingsView />
+            )}
+            {activeTab === 'tags' && profile.role === 'admin' && !lockToWhatsapp && <TagsView />}
+            {activeTab === 'canned' && profile.role === 'admin' && !lockToWhatsapp && (
+              <CannedView />
+            )}
+            {activeTab === 'comunicador-interno' && !lockToWhatsapp && <InternalChatView />}
+            {activeTab === 'grupos' && !lockToWhatsapp && <GroupsView />}
+          </>
         )}
-        {activeTab === 'users' && profile.role === 'admin' && <UsersView />}
-        {activeTab === 'whatsapp' && profile.role === 'admin' && <WhatsappView />}
-        {activeTab === 'auto-messages' && profile.role === 'admin' && <AutoMessagesView />}
-        {activeTab === 'settings' && profile.role === 'admin' && <SettingsView />}
-        {activeTab === 'tags' && profile.role === 'admin' && <TagsView />}
-        {activeTab === 'canned' && profile.role === 'admin' && <CannedView />}
-        {activeTab === 'comunicador-interno' && <InternalChatView />}
-        {activeTab === 'grupos' && <GroupsView />}
       </main>
 
       <div className="fixed bottom-4 right-4 space-y-3 z-50">

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { useWhatsappConnection } from '../../hooks/useData';
+import { useWhatsappConnection } from '../../context/useWhatsappConnection';
 import { api } from '../../lib/api';
 import { QrCode, RefreshCw, Wifi, WifiOff, Loader2, AlertCircle } from 'lucide-react';
 
