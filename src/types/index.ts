@@ -20,7 +20,11 @@ export interface Profile {
   /** Unmapped API role — use for admin-only gates (e.g. wallpaper). */
   apiRole: ApiUserRole;
   department: Department;
+  /** @deprecated Prefer `sectorIds` — first linked sector for legacy filters. */
   sectorId?: string | null;
+  /** All sectors this user can attend (N:N). */
+  sectorIds: string[];
+  sectors: Array<{ id: string; name: string; triageOption?: number }>;
   max_concurrent_chats: number;
   work_start: string | null;
   work_end: string | null;

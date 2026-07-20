@@ -167,7 +167,9 @@ export function ChatView({ preselectedTicketId, onConsumePreselect, onSelectedTi
     return ticketsWithAgenda.filter(
       (t) =>
         t.status === 'triage' ||
-        (profile?.sectorId != null && t.sectorId === profile.sectorId) ||
+        (profile?.sectorIds?.length
+          ? profile.sectorIds.includes(t.sectorId ?? '')
+          : profile?.sectorId != null && t.sectorId === profile.sectorId) ||
         t.assigned_to === profile?.id ||
         t.pending_transfer_to === profile?.id,
     );

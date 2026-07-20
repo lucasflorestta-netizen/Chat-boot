@@ -112,7 +112,32 @@ export function mapAgentStatus(raw: unknown): AgentStatus {
 }
 
 export function mapProfile(raw: any): Profile {
-  const sectorName = raw?.sector?.name ?? null;
+  const sectorsRaw = Array.isArray(raw?.sectors) ? raw.sectors : [];
+  const sectors = sectorsRaw
+    .map((row: any) => {
+      const s = row?.sector ?? row;
+      if (!s?.id) return null;
+      return {
+        id: String(s.id),
+        name: String(s.name ?? ''),
+        triageOption: s.triageOption ?? s.triage_option,
+      };
+    })
+    .filter(Boolean) as Array<{ id: string; name: string; triageOption?: number }>;
+
+  const sectorIds =
+    Array.isArray(raw?.sectorIds) && raw.sectorIds.length
+      ? raw.sectorIds.map(String)
+      : sectors.map((s) => s.id);
+
+  const primaryId =
+    raw.sectorId ?? raw.sector?.id ?? sectorIds[0] ?? null;
+  const primaryName =
+    raw?.sector?.name ??
+    sectors.find((s) => s.id === primaryId)?.name ??
+    sectors[0]?.name ??
+    null;
+
   return {
     id: raw.id,
     name: raw.name || raw.username || 'Usuário',
@@ -120,8 +145,10 @@ export function mapProfile(raw: any): Profile {
     email: raw.email ?? null,
     role: mapRole(raw.role),
     apiRole: String(raw.role ?? 'OPERATOR'),
-    department: mapSectorToDepartment(sectorName),
-    sectorId: raw.sectorId ?? raw.sector?.id ?? null,
+    department: mapSectorToDepartment(primaryName),
+    sectorId: primaryId,
+    sectorIds,
+    sectors,
     max_concurrent_chats: raw.limiteSimultaneo ?? raw.max_concurrent_chats ?? 3,
     work_start: raw.workStart ?? raw.work_start ?? null,
     work_end: raw.workEnd ?? raw.work_end ?? null,

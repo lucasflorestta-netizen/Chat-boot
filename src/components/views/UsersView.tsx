@@ -96,9 +96,17 @@ export function UsersView() {
                   }`}>
                     {roleLabel(p.apiRole)}
                   </span>
-                  <span className="badge bg-ink-700 text-ink-200 text-xs">
-                    {departmentLabel(p.department)}
-                  </span>
+                  {p.sectors?.length ? (
+                    p.sectors.map((s) => (
+                      <span key={s.id} className="badge bg-ink-700 text-ink-200 text-xs">
+                        {s.name}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="badge bg-ink-700 text-ink-200 text-xs">
+                      {departmentLabel(p.department)}
+                    </span>
+                  )}
                   <span className={`badge text-xs ${agentStatusBadgeClass(p.status)}`}>
                     {agentStatusLabel(p.status)}
                   </span>
@@ -271,6 +279,56 @@ function ScheduleBar({
   );
 }
 
+function SectorMultiSelect({
+  sectors,
+  selectedIds,
+  onChange,
+}: {
+  sectors: Array<{ id: string; name: string }>;
+  selectedIds: string[];
+  onChange: (ids: string[]) => void;
+}) {
+  const toggle = (id: string) => {
+    if (selectedIds.includes(id)) {
+      onChange(selectedIds.filter((x) => x !== id));
+    } else {
+      onChange([...selectedIds, id]);
+    }
+  };
+
+  return (
+    <div className="space-y-1.5">
+      <label className="label">Setores</label>
+      <div className="rounded-lg border border-ink-600 bg-ink-900/50 p-2.5 max-h-40 overflow-y-auto space-y-1.5">
+        {sectors.length === 0 ? (
+          <p className="text-xs text-ink-400 px-1">Nenhum setor cadastrado</p>
+        ) : (
+          sectors.map((s) => {
+            const checked = selectedIds.includes(s.id);
+            return (
+              <label
+                key={s.id}
+                className="flex items-center gap-2 px-1.5 py-1 rounded-md hover:bg-ink-800 cursor-pointer"
+              >
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => toggle(s.id)}
+                  className="rounded border-ink-500 text-brand-500 focus:ring-brand-500"
+                />
+                <span className="text-sm text-ink-100">{s.name}</span>
+              </label>
+            );
+          })
+        )}
+      </div>
+      <p className="text-[11px] text-ink-400">
+        Selecione um ou mais setores que este atendente pode receber.
+      </p>
+    </div>
+  );
+}
+
 function CreateUserForm({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
   const { sectors } = useSectors();
   const [name, setName] = useState('');
@@ -278,7 +336,7 @@ function CreateUserForm({ onClose, onCreated }: { onClose: () => void; onCreated
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState<ApiUserRole>('OPERATOR');
-  const [sectorId, setSectorId] = useState('');
+  const [sectorIds, setSectorIds] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -295,7 +353,7 @@ function CreateUserForm({ onClose, onCreated }: { onClose: () => void; onCreated
           password,
           name: name.trim(),
           role: toApiRole(role),
-          sectorId: sectorId || undefined,
+          sectorIds,
         }),
       });
       onCreated();
@@ -337,14 +395,12 @@ function CreateUserForm({ onClose, onCreated }: { onClose: () => void; onCreated
             <option value="ADMIN">Administrador</option>
           </select>
         </div>
-        <div>
-          <label className="label">Setor</label>
-          <select value={sectorId} onChange={(e) => setSectorId(e.target.value)} className="input">
-            <option value="">Sem setor</option>
-            {sectors.map((s) => (
-              <option key={s.id} value={s.id}>{s.name}</option>
-            ))}
-          </select>
+        <div className="md:col-span-2">
+          <SectorMultiSelect
+            sectors={sectors}
+            selectedIds={sectorIds}
+            onChange={setSectorIds}
+          />
         </div>
       </div>
       {error && <p className="text-sm text-danger-400 mt-2">{error}</p>}
@@ -377,7 +433,13 @@ function EditUserModal({ user, onClose, onSaved }: { user: Profile; onClose: () 
   const [email, setEmail] = useState(user.email || '');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState<ApiUserRole>(normalizeApiRole(user.apiRole));
-  const [sectorId, setSectorId] = useState(user.sectorId || '');
+  const [sectorIds, setSectorIds] = useState<string[]>(
+    user.sectorIds?.length
+      ? user.sectorIds
+      : user.sectorId
+        ? [user.sectorId]
+        : [],
+  );
   const [maxChats, setMaxChats] = useState(user.max_concurrent_chats);
   const [workStart, setWorkStart] = useState(user.work_start || '09:00');
   const [workEnd, setWorkEnd] = useState(user.work_end || '18:00');
@@ -449,7 +511,7 @@ function EditUserModal({ user, onClose, onSaved }: { user: Profile; onClose: () 
           email: trimmedEmail || null,
           ...(trimmedPassword ? { password: trimmedPassword } : {}),
           role: toApiRole(role),
-          sectorId: sectorId || null,
+          sectorIds,
           limiteSimultaneo: maxChats,
           workStart,
           workEnd,
@@ -542,15 +604,6 @@ function EditUserModal({ user, onClose, onSaved }: { user: Profile; onClose: () 
               </select>
             </div>
             <div>
-              <label className="label">Setor</label>
-              <select value={sectorId} onChange={(e) => setSectorId(e.target.value)} className="input">
-                <option value="">Sem setor</option>
-                {sectors.map((s) => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
-                ))}
-              </select>
-            </div>
-            <div>
               <label className="label">Máx. Conversas Simultâneas</label>
               <input
                 type="number"
@@ -559,6 +612,13 @@ function EditUserModal({ user, onClose, onSaved }: { user: Profile; onClose: () 
                 className="input"
                 min={1}
                 max={50}
+              />
+            </div>
+            <div className="col-span-2">
+              <SectorMultiSelect
+                sectors={sectors}
+                selectedIds={sectorIds}
+                onChange={setSectorIds}
               />
             </div>
             <div>
