@@ -11,7 +11,21 @@ import { departmentLabel } from '../../lib/mappers';
 import type { ApiUserRole, Profile } from '../../types';
 import { ContactAvatar } from '../ContactAvatar';
 import { AvatarUploadButton } from '../AvatarUploadButton';
-import { UserPlus, Trash2, Shield, Loader2, Save, X, Clock, Pencil, Calendar } from 'lucide-react';
+import {
+  UserPlus,
+  Trash2,
+  Shield,
+  Loader2,
+  Save,
+  X,
+  Clock,
+  Pencil,
+  Calendar,
+  Plus,
+  Hash,
+} from 'lucide-react';
+
+type SectorRow = { id: string; name: string; triageOption?: number };
 
 function roleLabel(apiRole: string): string {
   if (apiRole === 'ADMIN') return 'Administrador';
@@ -31,6 +45,7 @@ function normalizeApiRole(value: string | undefined | null): ApiUserRole {
 
 export function UsersView() {
   const { profiles, loading, refetch } = useProfiles();
+  const { sectors, loading: sectorsLoading, refetch: refetchSectors } = useSectors();
   const { profile: currentUser, refreshProfile } = useAuth();
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState<Profile | null>(null);
@@ -48,7 +63,7 @@ export function UsersView() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-bold text-white">Gestão de Usuários</h2>
-          <p className="text-sm text-ink-300">Gerencie agentes, permissões e horários de atendimento</p>
+          <p className="text-sm text-ink-300">Gerencie setores, agentes, permissões e horários de atendimento</p>
         </div>
         <button onClick={() => setShowAdd(true)} className="btn-primary">
           <UserPlus className="w-4 h-4" />
@@ -56,8 +71,15 @@ export function UsersView() {
         </button>
       </div>
 
+      <SectorsCard
+        sectors={sectors}
+        loading={sectorsLoading}
+        onChanged={refetchSectors}
+      />
+
       {showAdd && (
         <CreateUserForm
+          sectors={sectors}
           onClose={() => setShowAdd(false)}
           onCreated={() => { setShowAdd(false); refetch(); }}
         />
@@ -195,6 +217,7 @@ export function UsersView() {
       {editing && (
         <EditUserModal
           user={editing}
+          sectors={sectors}
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null);
@@ -202,6 +225,234 @@ export function UsersView() {
             if (editing.id === currentUser?.id) void refreshProfile();
           }}
         />
+      )}
+    </div>
+  );
+}
+
+function SectorsCard({
+  sectors,
+  loading,
+  onChanged,
+}: {
+  sectors: SectorRow[];
+  loading: boolean;
+  onChanged: () => void;
+}) {
+  const [showAdd, setShowAdd] = useState(false);
+  const [name, setName] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState('');
+
+  const handleCreate = async () => {
+    const trimmed = name.trim();
+    if (trimmed.length < 2) {
+      setError('O nome deve ter pelo menos 2 caracteres.');
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      await api('/sectors', {
+        method: 'POST',
+        body: JSON.stringify({ name: trimmed }),
+      });
+      setName('');
+      setShowAdd(false);
+      onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Falha ao criar setor');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSaveEdit = async (id: string) => {
+    const trimmed = editName.trim();
+    if (trimmed.length < 2) {
+      setError('O nome deve ter pelo menos 2 caracteres.');
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      await api(`/sectors/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ name: trimmed }),
+      });
+      setEditingId(null);
+      onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Falha ao renomear setor');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async (sector: SectorRow) => {
+    if (!confirm(`Excluir o setor "${sector.name}"?`)) return;
+    setError(null);
+    try {
+      await api(`/sectors/${sector.id}`, { method: 'DELETE' });
+      if (editingId === sector.id) setEditingId(null);
+      onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Falha ao excluir setor');
+    }
+  };
+
+  return (
+    <div className="card p-4">
+      <div className="flex items-center justify-between gap-3 mb-3">
+        <div>
+          <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+            <Hash className="w-4 h-4 text-brand-400" />
+            Setores
+          </h3>
+          <p className="text-xs text-ink-300 mt-0.5">
+            Opções do menu URA (ex.: 1 - Suporte). Vincule agentes no formulário do usuário.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            setShowAdd((v) => !v);
+            setError(null);
+          }}
+          className="btn-secondary text-xs"
+        >
+          <Plus className="w-3.5 h-3.5" />
+          Novo setor
+        </button>
+      </div>
+
+      {showAdd && (
+        <div className="flex flex-col sm:flex-row gap-2 mb-3 animate-fade-in">
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className="input flex-1"
+            placeholder="Nome do setor (ex: Suporte)"
+            autoFocus
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void handleCreate();
+            }}
+          />
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => void handleCreate()}
+              disabled={saving || name.trim().length < 2}
+              className="btn-primary text-xs"
+            >
+              {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+              Criar
+            </button>
+            <button
+              type="button"
+              onClick={() => { setShowAdd(false); setName(''); setError(null); }}
+              className="btn-ghost text-xs"
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {error && (
+        <p className="text-xs text-danger-400 mb-2">{error}</p>
+      )}
+
+      {loading ? (
+        <div className="flex items-center gap-2 text-ink-300 text-xs py-2">
+          <Loader2 className="w-4 h-4 animate-spin" />
+          Carregando setores…
+        </div>
+      ) : sectors.length === 0 ? (
+        <p className="text-xs text-ink-400 py-2">
+          Nenhum setor cadastrado. Crie o primeiro para montar o menu de opções.
+        </p>
+      ) : (
+        <ul className="divide-y divide-ink-700 rounded-lg border border-ink-700 overflow-hidden">
+          {sectors
+            .slice()
+            .sort((a, b) => (a.triageOption ?? 0) - (b.triageOption ?? 0))
+            .map((sector) => {
+              const isEditing = editingId === sector.id;
+              return (
+                <li
+                  key={sector.id}
+                  className="flex items-center gap-2 px-3 py-2.5 bg-ink-900/40 hover:bg-ink-800/60 transition-colors"
+                >
+                  <span className="badge bg-brand-500/20 text-brand-300 text-xs tabular-nums shrink-0 w-8 justify-center">
+                    {sector.triageOption ?? '—'}
+                  </span>
+                  {isEditing ? (
+                    <input
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      className="input flex-1 text-sm py-1.5"
+                      autoFocus
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') void handleSaveEdit(sector.id);
+                        if (e.key === 'Escape') setEditingId(null);
+                      }}
+                    />
+                  ) : (
+                    <span className="flex-1 text-sm text-white truncate">{sector.name}</span>
+                  )}
+                  <div className="flex items-center gap-1 shrink-0">
+                    {isEditing ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => void handleSaveEdit(sector.id)}
+                          disabled={saving}
+                          className="btn-ghost p-1.5 text-success-500"
+                          title="Salvar"
+                        >
+                          {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditingId(null)}
+                          className="btn-ghost p-1.5"
+                          title="Cancelar"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingId(sector.id);
+                            setEditName(sector.name);
+                            setError(null);
+                          }}
+                          className="btn-ghost p-1.5 text-ink-300 hover:text-white"
+                          title="Renomear"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleDelete(sector)}
+                          className="btn-ghost p-1.5 text-ink-300 hover:text-danger-400"
+                          title="Excluir"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+        </ul>
       )}
     </div>
   );
@@ -329,8 +580,15 @@ function SectorMultiSelect({
   );
 }
 
-function CreateUserForm({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
-  const { sectors } = useSectors();
+function CreateUserForm({
+  sectors,
+  onClose,
+  onCreated,
+}: {
+  sectors: SectorRow[];
+  onClose: () => void;
+  onCreated: () => void;
+}) {
   const [name, setName] = useState('');
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
@@ -426,8 +684,17 @@ for (let h = 0; h < 24; h++) {
   }
 }
 
-function EditUserModal({ user, onClose, onSaved }: { user: Profile; onClose: () => void; onSaved: () => void }) {
-  const { sectors } = useSectors();
+function EditUserModal({
+  user,
+  sectors,
+  onClose,
+  onSaved,
+}: {
+  user: Profile;
+  sectors: SectorRow[];
+  onClose: () => void;
+  onSaved: () => void;
+}) {
   const [name, setName] = useState(user.name);
   const [username, setUsername] = useState(user.username);
   const [email, setEmail] = useState(user.email || '');

@@ -1,19 +1,59 @@
-import { useState, useEffect } from 'react';
-import { useAutoMessageSettings } from '../../hooks/useData';
+import { useState, useEffect, useMemo } from 'react';
+import { useAutoMessageSettings, useSectors } from '../../hooks/useData';
 import { api } from '../../lib/api';
 import { mapAutoSettings } from '../../lib/mappers';
 import type { AutoMessageSettings } from '../../types';
 import { Save, Loader2, MessageSquare, Bot, UserCheck, CheckCircle, Star, Power, Check, AlertCircle, Moon, Clock, Link2, Hash, Users } from 'lucide-react';
 
+/** Same rule as API: lines like `1 - Suporte` are sector options. */
+const MENU_OPTION_LINE = /^\d+\s*[-–.]\s*.+$/;
+const DEFAULT_MENU_INTRO = 'Digite o número do setor:';
+
+function extractMenuIntro(message: string): string {
+  const introLines = (message ?? '')
+    .split('\n')
+    .filter((line) => !MENU_OPTION_LINE.test(line.trim()));
+  return introLines.join('\n').trimEnd() || DEFAULT_MENU_INTRO;
+}
+
+function buildBotMenuMessage(
+  intro: string,
+  sectors: Array<{ triageOption?: number; name: string }>,
+): string {
+  const safeIntro = intro.trimEnd() || DEFAULT_MENU_INTRO;
+  const sorted = [...sectors].sort(
+    (a, b) => (a.triageOption ?? 0) - (b.triageOption ?? 0),
+  );
+  const optionLines = sorted.map(
+    (s) => `${s.triageOption ?? '?'} - ${s.name}`,
+  );
+  return optionLines.length
+    ? `${safeIntro}\n${optionLines.join('\n')}`
+    : safeIntro;
+}
+
 export function AutoMessagesView() {
   const { settings, loading, refetch } = useAutoMessageSettings();
+  const { sectors, loading: sectorsLoading } = useSectors();
   const [form, setForm] = useState<AutoMessageSettings | null>(settings);
+  const [menuIntro, setMenuIntro] = useState(DEFAULT_MENU_INTRO);
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   useEffect(() => {
     setForm(settings);
+    if (settings?.bot_menu_message != null) {
+      setMenuIntro(extractMenuIntro(settings.bot_menu_message));
+    }
   }, [settings]);
+
+  const sectorOptionLines = useMemo(
+    () =>
+      [...sectors]
+        .sort((a, b) => (a.triageOption ?? 0) - (b.triageOption ?? 0))
+        .map((s) => `${s.triageOption ?? '?'} - ${s.name}`),
+    [sectors],
+  );
 
   useEffect(() => {
     if (!feedback) return;
@@ -51,13 +91,14 @@ export function AutoMessagesView() {
     setSaving(true);
     setFeedback(null);
     try {
+      const botMenuMessage = buildBotMenuMessage(menuIntro, sectors);
       const data = await api<any>('/auto-message-settings', {
         method: 'PUT',
         body: JSON.stringify({
           greetingMessage: form.greeting_message,
           protocolName: form.protocol_name,
           botMenuActive: form.bot_menu_active,
-          botMenuMessage: form.bot_menu_message,
+          botMenuMessage,
           takeoverMessage: form.takeover_message,
           closingMessage: form.closing_message,
           npsQuestion: form.nps_question,
@@ -72,7 +113,11 @@ export function AutoMessagesView() {
           satisfactionFormUrl: form.satisfaction_form_url?.trim() ?? '',
         }),
       });
-      if (data) setForm(mapAutoSettings(data));
+      if (data) {
+        const mapped = mapAutoSettings(data);
+        setForm(mapped);
+        setMenuIntro(extractMenuIntro(mapped.bot_menu_message));
+      }
       setFeedback({ type: 'success', message: 'Configurações salvas com sucesso.' });
       await refetch();
     } catch (err) {
@@ -169,16 +214,38 @@ export function AutoMessagesView() {
           <SettingCard
             icon={<Bot className="w-5 h-5" />}
             title="Mensagem do Menu de Opções"
-            description="Menu numérico para o cliente escolher o setor (ex: 1-Suporte, 2-Vendas)"
+            description="Texto introdutório + opções geradas pelos Setores (Usuários). O número digitado pelo cliente direciona aos agentes vinculados àquele setor."
           >
+            <label className="label">Texto introdutório</label>
             <textarea
-              value={form.bot_menu_message}
-              onChange={(e) => setForm({ ...form, bot_menu_message: e.target.value })}
-              rows={4}
+              value={menuIntro}
+              onChange={(e) => setMenuIntro(e.target.value)}
+              rows={2}
               className="input resize-none"
+              placeholder={DEFAULT_MENU_INTRO}
             />
+            <p className="mt-3 mb-1.5 text-xs font-medium text-ink-200">Opções (de Usuários → Setores)</p>
+            <div className="rounded-lg border border-ink-600 bg-ink-900/60 px-3 py-2.5 space-y-1 min-h-[4.5rem]">
+              {sectorsLoading ? (
+                <p className="text-xs text-ink-400 flex items-center gap-2">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  Carregando setores…
+                </p>
+              ) : sectorOptionLines.length === 0 ? (
+                <p className="text-xs text-ink-400">
+                  Nenhum setor cadastrado. Crie setores em Usuários para montar o menu.
+                </p>
+              ) : (
+                sectorOptionLines.map((line) => (
+                  <p key={line} className="text-sm text-white font-mono tabular-nums">
+                    {line}
+                  </p>
+                ))
+              )}
+            </div>
             <p className="mt-2 text-xs text-ink-300">
-              Use o formato: &quot;Digite 1 para Suporte ou 2 para Vendas&quot;. O sistema reconhece os números automaticamente.
+              Ex.: cliente digita <span className="text-ink-100">1</span> → setor com número 1 → só atendentes vinculados a esse setor.
+              Para alterar a numeração ou os nomes, edite em <span className="text-ink-100">Usuários → Setores</span>.
             </p>
           </SettingCard>
 
