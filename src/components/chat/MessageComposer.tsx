@@ -1,13 +1,15 @@
-import { useEffect, useRef, useState } from 'react';
-import { Loader2, Paperclip, Send, Smile, Zap } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Loader2, Paperclip, Plus, Send, Smile, Zap } from 'lucide-react';
 import type { CannedResponse, Message } from '../../types';
 import { autoCapitalize } from '../../lib/autoCapitalize';
+import { mediaUrl } from '../../lib/api';
 import {
   applyWordReplacement,
   checkCompletedWord,
   prefetchSpellcheck,
   type SpellSuggestion,
 } from '../../lib/spellcheck';
+import type { RecentSticker } from '../../lib/recentStickers';
 import { ReplyPreviewBar } from './ReplyPreviewBar';
 import { VoiceRecorder } from './VoiceRecorder';
 
@@ -18,6 +20,9 @@ interface MessageComposerProps {
   onSendText: (body: string) => Promise<void>;
   onPickFiles: (files: File[]) => void;
   onSendAudio: (blob: Blob, fileName: string) => Promise<void>;
+  onSendSticker: (file: File) => Promise<void>;
+  onSendStickerUrl: (url: string) => Promise<void>;
+  recentStickers: RecentSticker[];
   canned: CannedResponse[];
   disabled?: boolean;
   uploading?: boolean;
@@ -31,6 +36,9 @@ export function MessageComposer({
   onSendText,
   onPickFiles,
   onSendAudio,
+  onSendSticker,
+  onSendStickerUrl,
+  recentStickers,
   canned,
   disabled,
   uploading = false,
@@ -42,6 +50,7 @@ export function MessageComposer({
   const [error, setError] = useState<string | null>(null);
   const [voiceBusy, setVoiceBusy] = useState(false);
   const [spellHint, setSpellHint] = useState<SpellSuggestion | null>(null);
+  const [stickerBusy, setStickerBusy] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const spellRequestId = useRef(0);
 
@@ -55,6 +64,7 @@ export function MessageComposer({
     setShowEmoji(false);
     setShowCanned(false);
     setSpellHint(null);
+    setStickerBusy(false);
   }, [disabled]);
 
   const restoreCursor = (pos: number) => {
@@ -136,7 +146,34 @@ export function MessageComposer({
     }
   };
 
+  const handleStickerFile = async (file: File) => {
+    setError(null);
+    setStickerBusy(true);
+    try {
+      await onSendSticker(file);
+      setShowEmoji(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Falha ao enviar figurinha');
+    } finally {
+      setStickerBusy(false);
+    }
+  };
+
+  const handleStickerRecent = async (url: string) => {
+    setError(null);
+    setStickerBusy(true);
+    try {
+      await onSendStickerUrl(url);
+      setShowEmoji(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Falha ao enviar figurinha');
+    } finally {
+      setStickerBusy(false);
+    }
+  };
+
   const canType = !voiceBusy;
+  const panelBusy = uploading || stickerBusy;
   const showSpellChips = Boolean(spellHint && !showCanned && !showEmoji && canType && !disabled);
 
   return (
@@ -164,7 +201,17 @@ export function MessageComposer({
       )}
 
       {showEmoji && canType && !disabled && (
-        <EmojiPicker onSelect={(e) => setInput((prev) => autoCapitalize(prev + e))} />
+        <EmojiStickerPanel
+          recentStickers={recentStickers}
+          busy={panelBusy}
+          onSelectEmoji={(e) => setInput((prev) => autoCapitalize(prev + e))}
+          onPickStickerFile={(file) => {
+            void handleStickerFile(file);
+          }}
+          onSelectRecent={(url) => {
+            void handleStickerRecent(url);
+          }}
+        />
       )}
 
       {showSpellChips && spellHint && (
@@ -203,7 +250,7 @@ export function MessageComposer({
       )}
 
       {error && <p className="text-xs text-danger-400 mb-1">{error}</p>}
-      {uploading && (
+      {(uploading || stickerBusy) && (
         <p className="text-xs text-ink-300 mb-1 flex items-center gap-1.5">
           <Loader2 className="w-3 h-3 animate-spin" />
           Enviando…
@@ -236,7 +283,7 @@ export function MessageComposer({
                   setSpellHint(null);
                 }}
                 className="btn-ghost p-2 rounded-lg"
-                title="Emoji"
+                title="Emoji e figurinhas"
                 disabled={disabled}
               >
                 <Smile className="w-4 h-4" />
@@ -308,24 +355,137 @@ export function MessageComposer({
   );
 }
 
-function EmojiPicker({ onSelect }: { onSelect: (emoji: string) => void }) {
-  const emojis = [
-    '😀', '😂', '😍', '🤔', '👍', '👎', '❤️', '🔥', '✅', '❌',
-    '🙏', '👏', '💯', '🎉', '😢', '😡', '⭐', '📞', '💬', '✨',
-  ];
+type PanelTab = 'emoji' | 'stickers';
+
+function EmojiStickerPanel({
+  recentStickers,
+  busy,
+  onSelectEmoji,
+  onPickStickerFile,
+  onSelectRecent,
+}: {
+  recentStickers: RecentSticker[];
+  busy: boolean;
+  onSelectEmoji: (emoji: string) => void;
+  onPickStickerFile: (file: File) => void;
+  onSelectRecent: (url: string) => void;
+}) {
+  const [tab, setTab] = useState<PanelTab>('emoji');
+
+  const emojis = useMemo(
+    () => [
+      '😀', '😂', '😍', '🤔', '👍', '👎', '❤️', '🔥', '✅', '❌',
+      '🙏', '👏', '💯', '🎉', '😢', '😡', '⭐', '📞', '💬', '✨',
+    ],
+    [],
+  );
+
+  const handleStickerInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    const name = file.name.toLowerCase();
+    const isWebp =
+      file.type === 'image/webp' || name.endsWith('.webp');
+    if (!isWebp) {
+      return;
+    }
+    onPickStickerFile(file);
+  };
+
   return (
-    <div className="absolute bottom-14 left-3 card p-2 shadow-xl z-30 animate-fade-in">
-      <div className="grid grid-cols-7 gap-1">
-        {emojis.map((e) => (
-          <button
-            key={e}
-            type="button"
-            onClick={() => onSelect(e)}
-            className="w-8 h-8 flex items-center justify-center rounded hover:bg-ink-700 text-lg"
-          >
-            {e}
-          </button>
-        ))}
+    <div className="absolute bottom-14 left-3 w-[min(100%,20rem)] card p-0 shadow-xl z-30 animate-fade-in overflow-hidden">
+      <div className="flex border-b border-ink-700">
+        <button
+          type="button"
+          onClick={() => setTab('emoji')}
+          className={`flex-1 px-3 py-2 text-xs font-medium transition-colors ${
+            tab === 'emoji'
+              ? 'text-brand-400 border-b-2 border-brand-400 bg-ink-800/50'
+              : 'text-ink-300 hover:text-ink-100'
+          }`}
+        >
+          Emoji
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab('stickers')}
+          className={`flex-1 px-3 py-2 text-xs font-medium transition-colors ${
+            tab === 'stickers'
+              ? 'text-brand-400 border-b-2 border-brand-400 bg-ink-800/50'
+              : 'text-ink-300 hover:text-ink-100'
+          }`}
+        >
+          Figurinhas
+        </button>
+      </div>
+
+      <div className="p-2">
+        {tab === 'emoji' ? (
+          <div className="grid grid-cols-7 gap-1">
+            {emojis.map((e) => (
+              <button
+                key={e}
+                type="button"
+                onClick={() => onSelectEmoji(e)}
+                className="w-8 h-8 flex items-center justify-center rounded hover:bg-ink-700 text-lg"
+              >
+                {e}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-2 px-0.5">
+              <p className="text-[11px] text-ink-400 uppercase tracking-wide">Recentes</p>
+              <label
+                className={`inline-flex items-center gap-1 text-xs text-brand-400 hover:text-brand-300 cursor-pointer ${
+                  busy ? 'opacity-50 pointer-events-none' : ''
+                }`}
+                title="Adicionar figurinha (.webp)"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                Adicionar
+                <input
+                  type="file"
+                  className="hidden"
+                  accept="image/webp,.webp"
+                  disabled={busy}
+                  onChange={handleStickerInput}
+                />
+              </label>
+            </div>
+
+            {recentStickers.length === 0 ? (
+              <p className="text-xs text-ink-400 px-1 py-3 text-center">
+                Nenhuma figurinha recente — adicione um arquivo .webp
+              </p>
+            ) : (
+              <div className="grid grid-cols-4 gap-1.5 max-h-48 overflow-y-auto">
+                {recentStickers.map((s) => {
+                  const src = mediaUrl(s.url) ?? s.url;
+                  return (
+                    <button
+                      key={s.url}
+                      type="button"
+                      disabled={busy}
+                      onClick={() => onSelectRecent(s.url)}
+                      className="aspect-square rounded-lg overflow-hidden hover:bg-ink-700/80 disabled:opacity-50 p-1"
+                      title="Enviar figurinha"
+                    >
+                      <img
+                        src={src}
+                        alt="Figurinha"
+                        className="w-full h-full object-contain"
+                        draggable={false}
+                      />
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

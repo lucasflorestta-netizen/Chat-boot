@@ -11,7 +11,6 @@ import {
   FileText,
   TrendingUp,
   Star,
-  Users,
   Loader2,
   Filter,
 } from 'lucide-react';
@@ -483,29 +482,6 @@ export function Dashboard({ onNavigateToChat }: DashboardProps) {
             </div>
           )}
         </div>
-      </div>
-
-      <div className="card p-6">
-        <div className="flex items-center gap-2 mb-4">
-          <Users className="w-5 h-5 text-brand-400" />
-          <h3 className="text-sm font-semibold text-white">Contatos Salvos</h3>
-          <span className="text-xs text-ink-300 ml-auto">{contacts.length} contatos</span>
-        </div>
-        {contacts.length === 0 ? (
-          <p className="text-sm text-ink-300 py-4 text-center">Nenhum contato sincronizado ainda.</p>
-        ) : (
-          <div className="flex flex-wrap gap-2">
-            {contacts.slice(0, 20).map((c) => (
-              <div key={c.id} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-ink-800 text-sm">
-                <div className="w-6 h-6 rounded-full bg-brand-600 flex items-center justify-center text-xs text-white">
-                  {c.name.charAt(0).toUpperCase()}
-                </div>
-                <span className="text-ink-100">{c.name}</span>
-                <span className="text-ink-300 text-xs">{c.phone}</span>
-              </div>
-            ))}
-          </div>
-        )}
       </div>
     </div>
   );

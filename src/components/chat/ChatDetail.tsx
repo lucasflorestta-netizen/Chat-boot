@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   useProfiles,
   useCannedResponses,
@@ -7,6 +7,13 @@ import {
 } from '../../hooks/useData';
 import { api, mediaUrl, uploadFile } from '../../lib/api';
 import { departmentLabel, mapMessage, toApiMediaType } from '../../lib/mappers';
+import {
+  loadRecentStickers,
+  mergeRecentStickers,
+  pushRecentSticker,
+  toUploadPath,
+  type RecentSticker,
+} from '../../lib/recentStickers';
 import { useAuth } from '../../context/useAuth';
 import type { Ticket, Message, Tag, Profile, MessageType } from '../../types';
 import { ContactAvatar } from '../ContactAvatar';
@@ -98,7 +105,27 @@ export function ChatDetail({
   const [uploading, setUploading] = useState(false);
   const [fileError, setFileError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [recentStickers, setRecentStickers] = useState<RecentSticker[]>(() =>
+    loadRecentStickers(),
+  );
   const dragDepthRef = useRef(0);
+
+  const ticketStickerUrls = useMemo(
+    () =>
+      messages
+        .filter((m) => m.media_type === 'sticker' && m.media_url)
+        .map((m) => m.media_url as string),
+    [messages],
+  );
+
+  const mergedStickers = useMemo(
+    () => mergeRecentStickers(recentStickers, ticketStickerUrls),
+    [recentStickers, ticketStickerUrls],
+  );
+
+  const rememberSticker = useCallback((url: string) => {
+    setRecentStickers(pushRecentSticker(url));
+  }, []);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -331,7 +358,7 @@ export function ChatDetail({
     fileName: string,
     _contentType: string,
     caption: string | null,
-    mediaType: 'image' | 'audio' | 'file' | 'video',
+    mediaType: 'image' | 'audio' | 'file' | 'video' | 'sticker',
   ) => {
     if (!profile) return;
 
@@ -374,6 +401,7 @@ export function ChatDetail({
       if (absolute) mapped.media_url = absolute;
       replaceOptimistic(optimistic.id, mapped);
       setReplyingTo(null);
+      if (mediaType === 'sticker') rememberSticker(relativeUrl);
       URL.revokeObjectURL(objectUrl);
     } catch (err) {
       failOptimistic(optimistic.id);
@@ -402,6 +430,49 @@ export function ChatDetail({
         null,
         'audio',
       );
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleSendSticker = async (file: File) => {
+    const name = file.name.toLowerCase();
+    const isWebp = file.type === 'image/webp' || name.endsWith('.webp');
+    if (!isWebp) {
+      throw new Error('Figurinha deve ser um arquivo .webp');
+    }
+    setUploading(true);
+    try {
+      await uploadAndSendMedia(file, file.name || 'sticker.webp', file.type || 'image/webp', null, 'sticker');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleSendStickerUrl = async (url: string) => {
+    if (!profile) return;
+    const relativeUrl = toUploadPath(url);
+    if (!relativeUrl) {
+      throw new Error('Figurinha inválida para reenvio');
+    }
+
+    const absolute = mediaUrl(relativeUrl) ?? relativeUrl;
+    const optimistic = buildOptimistic({
+      body: null,
+      media_type: 'sticker',
+      media_url: absolute,
+      media_name: 'sticker.webp',
+    });
+
+    setUploading(true);
+    try {
+      await insertAgentMessage(optimistic, {
+        mediaUrl: relativeUrl,
+        mediaType: 'STICKER',
+        mediaName: 'sticker.webp',
+        replyToMessageId: replyingTo?.id ?? null,
+      });
+      rememberSticker(relativeUrl);
     } finally {
       setUploading(false);
     }
@@ -938,6 +1009,9 @@ export function ChatDetail({
             onSendText={handleSendText}
             onPickFiles={enqueueFiles}
             onSendAudio={handleSendAudio}
+            onSendSticker={handleSendSticker}
+            onSendStickerUrl={handleSendStickerUrl}
+            recentStickers={mergedStickers}
             canned={canned}
             uploading={uploading}
             disabled={!canInteract}
