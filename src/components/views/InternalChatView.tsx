@@ -8,7 +8,7 @@ import {
   Send,
   Users,
 } from 'lucide-react';
-import { useAuth } from '../../context/AuthContext';
+import { useAuth } from '../../context/useAuth';
 import { mediaUrl, uploadFile } from '../../lib/api';
 import {
   useInternalChat,

@@ -3,7 +3,7 @@ import { useAutoMessageSettings } from '../../hooks/useData';
 import { api } from '../../lib/api';
 import { mapAutoSettings } from '../../lib/mappers';
 import type { AutoMessageSettings } from '../../types';
-import { Save, Loader2, MessageSquare, Bot, UserCheck, CheckCircle, Star, Power, Check, AlertCircle, Moon, Clock } from 'lucide-react';
+import { Save, Loader2, MessageSquare, Bot, UserCheck, CheckCircle, Star, Power, Check, AlertCircle, Moon, Clock, Link2 } from 'lucide-react';
 
 export function AutoMessagesView() {
   const { settings, loading, refetch } = useAutoMessageSettings();
@@ -67,6 +67,7 @@ export function AutoMessagesView() {
           inactivityWarningMinutes: warnMin,
           inactivityClosingMessage: form.inactivity_closing_message,
           inactivityClosingMinutes: closeMin,
+          satisfactionFormUrl: form.satisfaction_form_url?.trim() ?? '',
         }),
       });
       if (data) setForm(mapAutoSettings(data));
@@ -300,8 +301,7 @@ export function AutoMessagesView() {
                   placeholder="Encerramos seu atendimento por inatividade. Obrigado!"
                 />
                 <p className="mt-2 text-xs text-ink-300">
-                  Opcional: use {'{{protocol}}'} no texto. O link do formulário de satisfação
-                  continua sendo anexado automaticamente quando configurado no servidor.
+                  Opcional: use {'{{protocol}}'} no texto.
                 </p>
               </div>
               <div>
@@ -354,6 +354,33 @@ export function AutoMessagesView() {
             rows={2}
             className="input resize-none"
           />
+        </SettingCard>
+
+        <SettingCard
+          icon={<Link2 className="w-5 h-5" />}
+          title="Formulário de Satisfação (Google Forms)"
+          description="Opcional. Link anexado ao encerrar por inatividade ou ao usar o atalho /fim"
+        >
+          <label className="mb-1.5 block text-sm text-ink-200">
+            URL do formulário{' '}
+            <span className="font-normal text-ink-400">(opcional)</span>
+          </label>
+          <input
+            type="text"
+            value={form.satisfaction_form_url ?? ''}
+            onChange={(e) =>
+              setForm({ ...form, satisfaction_form_url: e.target.value })
+            }
+            className="input"
+            placeholder="https://docs.google.com/forms/d/e/.../viewform"
+          />
+          <p className="mt-2 text-xs text-ink-300">
+            Pode deixar em branco. Se preenchido, o parâmetro{' '}
+            <code className="text-ink-200">?ticket=&lt;protocolo&gt;</code> é anexado
+            automaticamente. Se vazio, usa{' '}
+            <code className="text-ink-200">SATISFACTION_FORM_URL</code> do .env (se
+            existir); caso contrário, nenhum link é enviado.
+          </p>
         </SettingCard>
 
         <button onClick={handleSave} disabled={saving} className="btn-primary w-full">

@@ -31,14 +31,13 @@ export function ContactAvatar({
   }, [profilePicUrl]);
 
   if (showImage) {
-    const isWaCdn = Boolean(profilePicUrl?.includes('pps.whatsapp.net'));
     return (
       <img
         key={profilePicUrl}
         src={profilePicUrl!}
         alt={name || 'Contato'}
-        // WhatsApp CDN blocks hotlinks that send a referrer; Storage URLs prefer default.
-        referrerPolicy={isWaCdn ? 'no-referrer' : undefined}
+        // WhatsApp CDN e alguns proxies bloqueiam hotlink com referrer.
+        referrerPolicy="no-referrer"
         loading="lazy"
         decoding="async"
         className={`${sizeClasses[size]} ${roundedClass} object-cover flex-shrink-0 ${className}`}

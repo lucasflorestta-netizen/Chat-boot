@@ -1,22 +1,39 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../../lib/api';
 import { mapContact, mapTicket } from '../../lib/mappers';
-import { useNpsRatings } from '../../hooks/useData';
+import { useNpsRatings, useProfiles } from '../../hooks/useData';
 import {
   MessageSquare,
   CheckCircle,
   Clock,
   Ticket as TicketIcon,
   Download,
+  FileText,
   TrendingUp,
   Star,
   Users,
   Loader2,
+  Filter,
 } from 'lucide-react';
 import type { Ticket, Contact } from '../../types';
+import { downloadDashboardReportPdf } from '../../lib/dashboardReportPdf';
 
 interface DashboardProps {
   onNavigateToChat: () => void;
+}
+
+function toDayInput(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function daysAgo(n: number): string {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - n);
+  return toDayInput(d);
 }
 
 export function Dashboard({ onNavigateToChat }: DashboardProps) {
@@ -25,12 +42,33 @@ export function Dashboard({ onNavigateToChat }: DashboardProps) {
   const [avgResponseTime, setAvgResponseTime] = useState<string>('—');
   const [loading, setLoading] = useState(true);
   const [metrics, setMetrics] = useState<{
+    total?: number;
     openCount: number;
     closedToday: number;
     awaiting: number;
     byStatus: { status: string; count: number }[];
   } | null>(null);
+  const [exportingPdf, setExportingPdf] = useState(false);
+  const [reportError, setReportError] = useState<string | null>(null);
+
+  const [filterFrom, setFilterFrom] = useState('');
+  const [filterTo, setFilterTo] = useState('');
+  const [filterUserId, setFilterUserId] = useState('');
+  const [filterRating, setFilterRating] = useState('');
+
   const { summary: npsSummary } = useNpsRatings();
+  const { profiles } = useProfiles();
+
+  const agents = useMemo(
+    () =>
+      profiles
+        .filter((p) =>
+          ['OPERATOR', 'ADMIN', 'SUPERVISOR'].includes(String(p.apiRole ?? '').toUpperCase()),
+        )
+        .slice()
+        .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR')),
+    [profiles],
+  );
 
   useEffect(() => {
     (async () => {
@@ -43,13 +81,6 @@ export function Dashboard({ onNavigateToChat }: DashboardProps) {
         setMetrics(metricsData);
         setTickets((ticketsData || []).map(mapTicket));
         setContacts((contactsData || []).map(mapContact));
-
-        const attending = metricsData?.byStatus?.find((s: any) => s.status === 'EM_ATENDIMENTO')?.count;
-        const triage =
-          (metricsData?.byStatus?.find((s: any) => s.status === 'EM_TRIAGEM')?.count || 0) +
-          (metricsData?.awaiting || 0);
-        void attending;
-        void triage;
         setAvgResponseTime('—');
       } catch (err) {
         console.error('Dashboard load error:', err);
@@ -80,6 +111,24 @@ export function Dashboard({ onNavigateToChat }: DashboardProps) {
     return { total, dist, avg };
   }, [npsSummary]);
 
+  const applyPreset = (days: number | 'all') => {
+    if (days === 'all') {
+      setFilterFrom('');
+      setFilterTo('');
+      return;
+    }
+    setFilterFrom(daysAgo(days - 1));
+    setFilterTo(toDayInput(new Date()));
+  };
+
+  const clearFilters = () => {
+    setFilterFrom('');
+    setFilterTo('');
+    setFilterUserId('');
+    setFilterRating('');
+    setReportError(null);
+  };
+
   const exportContactsCSV = () => {
     const headers = ['Nome', 'Telefone', 'Criado em'];
     const rows = contacts.map((c) => [
@@ -105,6 +154,73 @@ export function Dashboard({ onNavigateToChat }: DashboardProps) {
     ]);
     const csv = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
     downloadCSV(csv, 'tickets_finalizados.csv');
+  };
+
+  const exportReportPdf = async () => {
+    if (filterFrom && filterTo && filterFrom > filterTo) {
+      setReportError('A data inicial não pode ser maior que a final.');
+      return;
+    }
+    setReportError(null);
+    setExportingPdf(true);
+    try {
+      const params = new URLSearchParams();
+      if (filterFrom) params.set('from', filterFrom);
+      if (filterTo) params.set('to', filterTo);
+      if (filterUserId) params.set('assigneeId', filterUserId);
+      if (filterRating) params.set('rating', filterRating);
+      const qs = params.toString();
+      const report = await api<{
+        filters: {
+          from: string | null;
+          to: string | null;
+          assigneeId: string | null;
+          assigneeName: string | null;
+          rating: number | null;
+        };
+        total: number;
+        openCount: number;
+        awaiting: number;
+        activeCount: number;
+        finishedCount: number;
+        closedInPeriod: number;
+        byStatus: { status: string; count: number }[];
+        nps: {
+          total: number;
+          average: number | null;
+          distribution: Record<number, number>;
+        };
+      }>(`/dashboard/report${qs ? `?${qs}` : ''}`);
+
+      downloadDashboardReportPdf({
+        generatedAt: new Date(),
+        filters: report.filters,
+        activeCount: report.activeCount,
+        finishedCount: report.finishedCount,
+        openCount: report.openCount,
+        awaiting: report.awaiting,
+        closedInPeriod: report.closedInPeriod,
+        totalTickets: report.total,
+        avgResponseTime,
+        byStatus: report.byStatus,
+        nps: {
+          total: report.nps.total,
+          average: report.nps.average,
+          distribution: {
+            1: report.nps.distribution?.[1] ?? 0,
+            2: report.nps.distribution?.[2] ?? 0,
+            3: report.nps.distribution?.[3] ?? 0,
+            4: report.nps.distribution?.[4] ?? 0,
+            5: report.nps.distribution?.[5] ?? 0,
+          },
+        },
+      });
+    } catch (err) {
+      console.error('Report export error:', err);
+      setReportError(err instanceof Error ? err.message : 'Falha ao gerar relatório');
+    } finally {
+      setExportingPdf(false);
+    }
   };
 
   const metricCards = [
@@ -148,12 +264,25 @@ export function Dashboard({ onNavigateToChat }: DashboardProps) {
 
   return (
     <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
           <h2 className="text-xl font-bold text-white">Dashboard</h2>
           <p className="text-sm text-ink-300">Visão geral do atendimento</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2 justify-end">
+          <button
+            onClick={() => void exportReportPdf()}
+            disabled={exportingPdf}
+            className="btn-primary"
+            title="Baixar relatório PDF com os filtros selecionados"
+          >
+            {exportingPdf ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <FileText className="w-4 h-4" />
+            )}
+            Gerar Relatório PDF
+          </button>
           <button onClick={exportContactsCSV} className="btn-secondary">
             <Download className="w-4 h-4" />
             Exportar Contatos
@@ -163,6 +292,97 @@ export function Dashboard({ onNavigateToChat }: DashboardProps) {
             Exportar Tickets
           </button>
         </div>
+      </div>
+
+      <div className="card p-4 space-y-3">
+        <div className="flex items-center gap-2">
+          <Filter className="w-4 h-4 text-brand-400" />
+          <h3 className="text-sm font-semibold text-white">Filtros do relatório</h3>
+          <span className="text-xs text-ink-300 ml-auto">Aplicados ao PDF</span>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className="btn-ghost text-xs px-2.5 py-1" onClick={() => applyPreset(7)}>
+            7 dias
+          </button>
+          <button type="button" className="btn-ghost text-xs px-2.5 py-1" onClick={() => applyPreset(30)}>
+            30 dias
+          </button>
+          <button type="button" className="btn-ghost text-xs px-2.5 py-1" onClick={() => applyPreset(90)}>
+            90 dias
+          </button>
+          <button type="button" className="btn-ghost text-xs px-2.5 py-1" onClick={() => applyPreset('all')}>
+            Todo período
+          </button>
+          <button type="button" className="btn-ghost text-xs px-2.5 py-1" onClick={clearFilters}>
+            Limpar filtros
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div>
+            <label className="label" htmlFor="report-from">
+              De
+            </label>
+            <input
+              id="report-from"
+              type="date"
+              className="input"
+              value={filterFrom}
+              onChange={(e) => setFilterFrom(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="label" htmlFor="report-to">
+              Até
+            </label>
+            <input
+              id="report-to"
+              type="date"
+              className="input"
+              value={filterTo}
+              onChange={(e) => setFilterTo(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="label" htmlFor="report-user">
+              Usuário
+            </label>
+            <select
+              id="report-user"
+              className="input"
+              value={filterUserId}
+              onChange={(e) => setFilterUserId(e.target.value)}
+            >
+              <option value="">Todos os usuários</option>
+              {agents.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="label" htmlFor="report-rating">
+              Avaliação (NPS)
+            </label>
+            <select
+              id="report-rating"
+              className="input"
+              value={filterRating}
+              onChange={(e) => setFilterRating(e.target.value)}
+            >
+              <option value="">Todas</option>
+              {[5, 4, 3, 2, 1].map((n) => (
+                <option key={n} value={String(n)}>
+                  {n} estrela{n > 1 ? 's' : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {reportError && <p className="text-sm text-danger-400">{reportError}</p>}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../context/useAuth';
 import { Headphones, Loader2, Mail, Lock, User, AlertCircle, RefreshCw } from 'lucide-react';
 
 export function AuthScreen() {

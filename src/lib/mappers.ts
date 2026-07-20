@@ -153,6 +153,10 @@ export function mapContact(raw: any): Contact {
       raw.profilePicUrl ?? raw.profile_pic_url ?? raw.photo ?? null,
     ),
     notes: raw.notes ?? null,
+    wa_conversation_at: isoOrNull(
+      raw.waConversationAt ?? raw.wa_conversation_at,
+    ),
+    wa_archived: !!(raw.waArchived ?? raw.wa_archived),
     created_at: iso(raw.createdAt ?? raw.created_at),
     updated_at: iso(raw.updatedAt ?? raw.updated_at),
   };
@@ -167,10 +171,39 @@ export function mapTag(raw: any): Tag {
   };
 }
 
+function pickLatestMessage(messages: any[] | undefined | null) {
+  if (!messages?.length) return null;
+  return messages.reduce((best, m) => {
+    const t = new Date(m.createdAt ?? m.created_at ?? 0).getTime();
+    const bt = new Date(best.createdAt ?? best.created_at ?? 0).getTime();
+    return t >= bt ? m : best;
+  });
+}
+
+function mapTicketLastMessage(raw: any): Ticket['last_message'] {
+  if (!raw) return null;
+  return {
+    id: raw.id,
+    body: raw.body ?? null,
+    media_type: mapMediaType(raw.mediaType ?? raw.media_type),
+    sender_type: mapSender(raw.sender ?? raw.sender_type),
+    created_at: iso(raw.createdAt ?? raw.created_at),
+    deleted_by_client:
+      raw.deletedByClient ?? raw.deleted_by_client ?? false,
+    deleted_for_client:
+      raw.deletedForClient ?? raw.deleted_for_client ?? false,
+  };
+}
+
 export function mapTicket(raw: any): Ticket {
   const tags = (raw.tags || [])
     .map((tt: any) => (tt?.tag ? mapTag(tt.tag) : tt?.id ? mapTag(tt) : null))
     .filter(Boolean) as Tag[];
+
+  const lastMessage =
+    mapTicketLastMessage(
+      raw.last_message ?? raw.lastMessage ?? pickLatestMessage(raw.messages),
+    ) ?? null;
 
   return {
     id: raw.id,
@@ -193,6 +226,7 @@ export function mapTicket(raw: any): Ticket {
         ? mapProfile(raw.assigned_agent)
         : null,
     tags,
+    last_message: lastMessage,
     pending_transfer_to:
       raw.pendingTransferToId ?? raw.pending_transfer_to ?? null,
     pending_transfer_from:
@@ -301,6 +335,8 @@ export function mapAutoSettings(raw: any): AutoMessageSettings {
     inactivity_closing_minutes: Number(
       raw.inactivityClosingMinutes ?? raw.inactivity_closing_minutes ?? 15,
     ),
+    satisfaction_form_url:
+      raw.satisfactionFormUrl ?? raw.satisfaction_form_url ?? '',
     updated_at: iso(raw.updatedAt ?? raw.updated_at),
   };
 }

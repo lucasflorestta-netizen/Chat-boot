@@ -1,31 +1,9 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { api, getToken, setToken } from '../lib/api';
 import { connectSocket, disconnectSocket, reconnectSocketWithToken } from '../lib/socket';
 import { mapProfile } from '../lib/mappers';
 import type { Profile } from '../types';
-
-interface AuthSession {
-  access_token: string;
-}
-
-interface AuthUser {
-  id: string;
-}
-
-interface AuthContextValue {
-  session: AuthSession | null;
-  user: AuthUser | null;
-  profile: Profile | null;
-  profileError: string | null;
-  loading: boolean;
-  signIn: (usernameOrEmail: string, password: string) => Promise<{ error: string | null }>;
-  signUp: (email: string, password: string, name: string) => Promise<{ error: string | null }>;
-  signOut: () => Promise<void>;
-  refreshProfile: () => Promise<void>;
-  patchProfile: (partial: Partial<Profile>) => void;
-}
-
-const AuthContext = createContext<AuthContextValue | undefined>(undefined);
+import { AuthContext, type AuthSession, type AuthUser } from './auth-context';
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<AuthSession | null>(null);
@@ -156,10 +134,4 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       {children}
     </AuthContext.Provider>
   );
-}
-
-export function useAuth() {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error('useAuth must be used within AuthProvider');
-  return ctx;
 }

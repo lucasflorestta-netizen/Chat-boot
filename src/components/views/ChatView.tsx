@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
-import { useTickets, useTags, useAppearanceSettings } from '../../hooks/useData';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useTickets, useTags, useAppearanceSettings, useContacts } from '../../hooks/useData';
 import { api } from '../../lib/api';
-import { useAuth } from '../../context/AuthContext';
+import { mapTicket } from '../../lib/mappers';
+import { useAuth } from '../../context/useAuth';
 import type { Ticket } from '../../types';
 import { resolveWallpaper } from '../../lib/chatWallpapers';
 import { ChatDetail } from '../chat/ChatDetail';
@@ -25,6 +26,86 @@ interface ChatViewProps {
 
 type TabFilter = 'all' | 'triage' | 'attending' | 'finished' | 'mine';
 
+/** Relógio do WA Web; fallback CRM. */
+function activityAt(t: Ticket): number {
+  const wa = t.contact?.wa_conversation_at
+    ? new Date(t.contact.wa_conversation_at).getTime()
+    : 0;
+  if (wa > 0) return wa;
+  const fromField = new Date(t.last_message_at).getTime();
+  const fromMsg = t.last_message?.created_at
+    ? new Date(t.last_message.created_at).getTime()
+    : 0;
+  return Math.max(fromField, fromMsg || 0);
+}
+
+/** Uma conversa por contato (estilo WA Tudo):
+ * - Ordena pelo conversationTimestamp do WhatsApp.
+ * - Preferir ticket aberto para abrir no CRM; preview do mais recente. */
+function dedupeByContact(tickets: Ticket[]): Ticket[] {
+  type Acc = {
+    display: Ticket;
+    sortAt: number;
+    preview: Ticket;
+    previewAt: number;
+  };
+  const best = new Map<string, Acc>();
+
+  for (const ticket of tickets) {
+    if (ticket.contact?.wa_archived) continue;
+
+    const key = ticket.contact_id || ticket.id;
+    const sortCandidate = activityAt(ticket);
+    const previewAt = new Date(ticket.last_message_at).getTime();
+    const existing = best.get(key);
+
+    if (!existing) {
+      best.set(key, {
+        display: ticket,
+        sortAt: sortCandidate,
+        preview: ticket,
+        previewAt,
+      });
+      continue;
+    }
+
+    const sortAt = Math.max(existing.sortAt, sortCandidate);
+    const preview = previewAt > existing.previewAt ? ticket : existing.preview;
+    const nextPreviewAt = Math.max(existing.previewAt, previewAt);
+
+    const existingOpen = existing.display.status !== 'finished';
+    const ticketOpen = ticket.status !== 'finished';
+
+    let display = existing.display;
+    if (ticketOpen && !existingOpen) {
+      display = ticket;
+    } else if (
+      ticketOpen === existingOpen &&
+      previewAt > new Date(existing.display.last_message_at).getTime()
+    ) {
+      display = ticket;
+    }
+
+    best.set(key, {
+      display,
+      sortAt,
+      preview,
+      previewAt: nextPreviewAt,
+    });
+  }
+
+  return [...best.values()]
+    .sort((a, b) => b.sortAt - a.sortAt)
+    .map(({ display, preview }) => ({
+      ...display,
+      last_message: preview.last_message ?? display.last_message,
+    }));
+}
+
+function sortByLastMessage(tickets: Ticket[]): Ticket[] {
+  return [...tickets].sort((a, b) => activityAt(b) - activityAt(a));
+}
+
 export function ChatView({ preselectedTicketId, onConsumePreselect, onSelectedTicketChange }: ChatViewProps) {
   const { profile } = useAuth();
   const isAdmin = profile?.role === 'admin';
@@ -32,15 +113,37 @@ export function ChatView({ preselectedTicketId, onConsumePreselect, onSelectedTi
   const [search, setSearch] = useState('');
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [filterTag, setFilterTag] = useState<string | null>(null);
-  const [tab, setTab] = useState<TabFilter>('triage');
+  const [tab, setTab] = useState<TabFilter>('all');
 
   const { tickets, loading } = useTickets();
+  const { contacts } = useContacts();
   const { tags, refetch: refetchTags } = useTags();
   const { settings: appearance, saving: wallpaperSaving, update: updateAppearance } =
     useAppearanceSettings();
+  const photoRefreshAttempted = useRef<Set<string>>(new Set());
+
+  /** Mesma fonte de foto/nome da Agenda de Contatos. */
+  const ticketsWithAgenda = useMemo(() => {
+    if (!contacts.length) return tickets;
+    const byId = new Map(contacts.map((c) => [c.id, c]));
+    return tickets.map((t) => {
+      const agenda = byId.get(t.contact_id) ?? (t.contact?.id ? byId.get(t.contact.id) : undefined);
+      if (!agenda) return t;
+      return {
+        ...t,
+        contact: {
+          ...(t.contact ?? agenda),
+          ...agenda,
+          // Preferir foto da agenda; manter a do ticket se agenda ainda não tiver.
+          profile_pic_url: agenda.profile_pic_url || t.contact?.profile_pic_url || null,
+          name: agenda.name || t.contact?.name || 'Contato',
+        },
+      };
+    });
+  }, [tickets, contacts]);
 
   useEffect(() => {
-    if (!isAdmin && tab !== 'triage' && tab !== 'mine') {
+    if (!isAdmin && (tab === 'all' || tab === 'attending' || tab === 'finished')) {
       setTab('triage');
     }
   }, [isAdmin, tab]);
@@ -60,20 +163,25 @@ export function ChatView({ preselectedTicketId, onConsumePreselect, onSelectedTi
   };
 
   const deptFiltered = useMemo(() => {
-    if (isAdmin) return tickets;
-    return tickets.filter(
+    if (isAdmin) return ticketsWithAgenda;
+    return ticketsWithAgenda.filter(
       (t) =>
         t.status === 'triage' ||
         (profile?.sectorId != null && t.sectorId === profile.sectorId) ||
         t.assigned_to === profile?.id ||
         t.pending_transfer_to === profile?.id,
     );
-  }, [tickets, profile, isAdmin]);
+  }, [ticketsWithAgenda, profile, isAdmin]);
+
+  /** Lista principal estilo WA Tudo — 1 contato, todos os status. */
+  const todosList = useMemo(() => dedupeByContact(deptFiltered), [deptFiltered]);
 
   /** Clientes aguardando atendimento (sem responsável). */
   const triageTickets = useMemo(
     () =>
-      deptFiltered.filter((t) => t.status === 'triage' && !t.assigned_to),
+      sortByLastMessage(
+        deptFiltered.filter((t) => t.status === 'triage' && !t.assigned_to),
+      ),
     [deptFiltered],
   );
 
@@ -82,22 +190,27 @@ export function ChatView({ preselectedTicketId, onConsumePreselect, onSelectedTi
       case 'triage':
         return triageTickets;
       case 'attending':
-        return deptFiltered.filter((t) => t.status === 'attending');
+        return sortByLastMessage(
+          deptFiltered.filter((t) => t.status === 'attending'),
+        );
       case 'finished':
-        return deptFiltered.filter((t) => t.status === 'finished');
+        return sortByLastMessage(
+          deptFiltered.filter((t) => t.status === 'finished'),
+        );
       case 'mine':
-        return deptFiltered.filter(
-          (t) =>
-            (t.assigned_to === profile?.id ||
-              t.pending_transfer_to === profile?.id) &&
-            t.status !== 'finished',
+        return sortByLastMessage(
+          deptFiltered.filter(
+            (t) =>
+              (t.assigned_to === profile?.id ||
+                t.pending_transfer_to === profile?.id) &&
+              t.status !== 'finished',
+          ),
         );
       case 'all':
       default:
-        // Todos: inclui finalizados — a conversa permanece na lista após encerrar.
-        return deptFiltered;
+        return todosList;
     }
-  }, [deptFiltered, triageTickets, tab, profile]);
+  }, [deptFiltered, triageTickets, todosList, tab, profile]);
 
   const searched = useMemo(() => {
     let result = tabFiltered;
@@ -114,28 +227,67 @@ export function ChatView({ preselectedTicketId, onConsumePreselect, onSelectedTi
     return result;
   }, [tabFiltered, search, filterTag]);
 
+  // Igual Agenda: sem foto local, pede refresh uma vez por contato (lista visível).
+  useEffect(() => {
+    const missing = searched
+      .map((t) => t.contact)
+      .filter((c): c is NonNullable<typeof c> => !!c?.id && !c.profile_pic_url)
+      .filter((c) => !photoRefreshAttempted.current.has(c.id));
+
+    // Limita rajada (Baileys é serial no backend).
+    for (const contact of missing.slice(0, 8)) {
+      photoRefreshAttempted.current.add(contact.id);
+      void api(`/whatsapp/contacts/${contact.id}/refresh-photo`, { method: 'POST' }).catch(
+        () => {
+          /* silencioso — privacidade WA / timeout */
+        },
+      );
+    }
+  }, [searched]);
+
   useEffect(() => {
     if (selectedTicket) {
-      const updated = tickets.find((t) => t.id === selectedTicket.id);
-      if (updated && updated !== selectedTicket) {
+      const updated = ticketsWithAgenda.find((t) => t.id === selectedTicket.id);
+      if (
+        updated &&
+        (updated !== selectedTicket ||
+          updated.contact?.profile_pic_url !== selectedTicket.contact?.profile_pic_url ||
+          updated.contact?.name !== selectedTicket.contact?.name)
+      ) {
         setSelectedTicket(updated);
       }
     }
-  }, [tickets, selectedTicket]);
+  }, [ticketsWithAgenda, selectedTicket]);
 
   useEffect(() => {
     onSelectedTicketChange?.(selectedTicket?.id ?? null);
   }, [selectedTicket?.id, onSelectedTicketChange]);
 
   useEffect(() => {
-    if (preselectedTicketId) {
-      const ticket = tickets.find((t) => t.id === preselectedTicketId);
-      if (ticket) {
-        setSelectedTicket(ticket);
-        onConsumePreselect?.();
-      }
+    if (!preselectedTicketId) return;
+
+    const ticket = ticketsWithAgenda.find((t) => t.id === preselectedTicketId);
+    if (ticket) {
+      setSelectedTicket(ticket);
+      onConsumePreselect?.();
+      return;
     }
-  }, [preselectedTicketId, tickets, onConsumePreselect]);
+
+    let cancelled = false;
+    void api<any>(`/tickets/${preselectedTicketId}`)
+      .then((raw) => {
+        if (cancelled || !raw) return;
+        setSelectedTicket(mapTicket(raw));
+        onConsumePreselect?.();
+      })
+      .catch(() => {
+        /* keep waiting for list/socket */
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [preselectedTicketId, ticketsWithAgenda, onConsumePreselect]);
 
   const handleSelectTicket = (ticket: Ticket) => {
     setSelectedTicket(ticket);
@@ -146,7 +298,23 @@ export function ChatView({ preselectedTicketId, onConsumePreselect, onSelectedTi
 
   const handleAssign = async (ticket: Ticket) => {
     if (!profile) return;
-    await api(`/tickets/${ticket.id}/assign`, { method: 'PATCH' });
+    try {
+      // Ticket finalizado: reabre criando/assumindo novo atendimento do contato.
+      if (ticket.status === 'finished') {
+        const contactId = ticket.contact_id;
+        if (!contactId) return;
+        const created = await api<any>(`/contacts/${contactId}/start-conversation`, {
+          method: 'POST',
+          body: JSON.stringify({ assume: true }),
+        });
+        if (created) setSelectedTicket(mapTicket(created));
+        return;
+      }
+      const updated = await api<any>(`/tickets/${ticket.id}/assign`, { method: 'PATCH' });
+      if (updated) setSelectedTicket(mapTicket(updated));
+    } catch (err) {
+      console.error('Error assigning ticket:', err);
+    }
   };
 
   const handleFinish = async (ticket: Ticket) => {
@@ -182,7 +350,7 @@ export function ChatView({ preselectedTicketId, onConsumePreselect, onSelectedTi
     {
       id: 'all',
       label: 'Todos',
-      count: deptFiltered.length,
+      count: todosList.length,
       icon: <Inbox className="w-3.5 h-3.5" />,
     },
     {

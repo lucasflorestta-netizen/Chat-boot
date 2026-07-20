@@ -1,4 +1,4 @@
-import { useAuth } from '../../context/AuthContext';
+import { useAuth } from '../../context/useAuth';
 import {
   LayoutDashboard,
   MessageSquare,
@@ -16,6 +16,8 @@ import {
   Volume2,
   VolumeX,
   SlidersHorizontal,
+  WifiOff,
+  StickyNote,
 } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { api } from '../../lib/api';
@@ -25,6 +27,8 @@ import {
 } from '../../lib/agentStatus';
 import type { AgentStatus } from '../../types';
 import { AvatarUploadButton } from '../AvatarUploadButton';
+import { useWhatsappConnection } from '../../hooks/useData';
+import { NotepadWindow } from '../notepad/NotepadWindow';
 
 export type TabId =
   | 'dashboard'
@@ -80,8 +84,18 @@ export function Sidebar({
   notifications,
 }: SidebarProps) {
   const { profile, signOut, refreshProfile, patchProfile } = useAuth();
+  const { connection, loading: waLoading } = useWhatsappConnection();
   const items = navItems.filter((item) => !item.adminOnly || profile?.role === 'admin');
   const [statusSaving, setStatusSaving] = useState(false);
+  const [notepadOpen, setNotepadOpen] = useState(false);
+  const [notepadMinimized, setNotepadMinimized] = useState(false);
+  const isWhatsappDisconnected = !waLoading && connection?.status === 'disconnected';
+  const canManageWhatsapp = profile?.role === 'admin';
+
+  const openNotepad = () => {
+    setNotepadOpen(true);
+    setNotepadMinimized(false);
+  };
 
   const updateStatus = async (status: AgentStatus) => {
     if (!profile || status === profile.status || statusSaving) return;
@@ -146,7 +160,40 @@ export function Sidebar({
       </nav>
 
       <div className="p-3 border-t border-ink-700 space-y-2">
+        {isWhatsappDisconnected && (
+          <button
+            type="button"
+            onClick={() => {
+              if (canManageWhatsapp) onNavigate('whatsapp');
+            }}
+            className={`w-full flex items-start gap-2 rounded-lg border border-danger-500/30 bg-danger-500/10 px-2.5 py-2 text-left ${
+              canManageWhatsapp ? 'hover:bg-danger-500/15 cursor-pointer' : 'cursor-default'
+            }`}
+            title={
+              canManageWhatsapp
+                ? 'Abrir Conexão WhatsApp'
+                : 'Aguarde um administrador reconectar'
+            }
+          >
+            <WifiOff className="w-3.5 h-3.5 text-danger-400 mt-0.5 flex-shrink-0" />
+            <span className="text-[11px] leading-snug text-danger-300">
+              <span className="font-semibold text-danger-200">WhatsApp desconectado.</span>
+              {canManageWhatsapp
+                ? ' Clique para reconectar.'
+                : ' Avise um administrador.'}
+            </span>
+          </button>
+        )}
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={openNotepad}
+            className={`btn-ghost px-2.5 py-2 ${notepadOpen && !notepadMinimized ? 'bg-ink-700 text-white' : ''}`}
+            title="Bloco de Notas"
+            aria-label="Bloco de Notas"
+          >
+            <StickyNote className="w-4 h-4" />
+          </button>
           <button
             onClick={onToggleSound}
             className="btn-ghost px-2.5 py-2 flex-1"
@@ -211,6 +258,17 @@ export function Sidebar({
           </button>
         </div>
       </div>
+
+      <NotepadWindow
+        open={notepadOpen}
+        minimized={notepadMinimized}
+        onClose={() => {
+          setNotepadOpen(false);
+          setNotepadMinimized(false);
+        }}
+        onMinimize={() => setNotepadMinimized(true)}
+        onRestore={() => setNotepadMinimized(false)}
+      />
     </aside>
   );
 }

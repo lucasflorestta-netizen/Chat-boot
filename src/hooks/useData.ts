@@ -41,7 +41,8 @@ export function useTickets(_filter?: { status?: string; department?: string; ass
 
   const fetchTickets = useCallback(async () => {
     try {
-      const data = await api<any[]>('/tickets');
+      // Sem dedupe no servidor: o front ordena/deduplica estilo WhatsApp (max atividade por contato).
+      const data = await api<any[]>('/tickets?contactDedupe=false');
       setTickets((data || []).map(mapTicket));
     } catch (err) {
       console.error('Error fetching tickets:', err);
@@ -79,11 +80,32 @@ export function useTickets(_filter?: { status?: string; department?: string; ass
 
         const existing = prev[idx];
         const mapped = rawTicket ? mapTicket(rawTicket) : existing;
+        const mappedMsg = payload?.message ? mapMessage(payload.message) : null;
+        const fromEvent = mappedMsg
+          ? {
+              id: mappedMsg.id,
+              body: mappedMsg.body,
+              media_type: mappedMsg.media_type,
+              sender_type: mappedMsg.sender_type,
+              created_at: mappedMsg.created_at,
+              deleted_by_client: mappedMsg.deleted_by_client,
+              deleted_for_client: mappedMsg.deleted_for_client,
+            }
+          : null;
         const merged = {
           ...existing,
           ...mapped,
           contact: mapped.contact
-            ? { ...existing.contact, ...mapped.contact }
+            ? {
+                ...existing.contact,
+                ...mapped.contact,
+                // Mantém o relógio do WA alinhado à última msg (ordem Tudo).
+                wa_conversation_at:
+                  fromEvent?.created_at ??
+                  mapped.contact.wa_conversation_at ??
+                  existing.contact?.wa_conversation_at ??
+                  null,
+              }
             : existing.contact,
           assigned_agent: mapped.assigned_agent ?? existing.assigned_agent,
           pending_transfer_to_agent:
@@ -92,14 +114,48 @@ export function useTickets(_filter?: { status?: string; department?: string; ass
             mapped.pending_transfer_from_agent ??
             existing.pending_transfer_from_agent,
           tags: mapped.tags?.length ? mapped.tags : existing.tags,
+          last_message: mapped.last_message ?? fromEvent ?? existing.last_message,
+          last_message_at:
+            fromEvent?.created_at ??
+            mapped.last_message_at ??
+            existing.last_message_at,
         };
         const next = [...prev];
         next.splice(idx, 1);
         return [merged, ...next];
       });
     };
-    const onContact = () => {
-      void fetchTickets();
+    const onContact = (payload?: { contact?: any }) => {
+      if (!payload?.contact) {
+        void fetchTickets();
+        return;
+      }
+      const mapped = mapContact(payload.contact);
+      setTickets((prev) =>
+        prev.map((t) => {
+          if (t.contact_id !== mapped.id && t.contact?.id !== mapped.id) {
+            return t;
+          }
+          return {
+            ...t,
+            contact: {
+              ...(t.contact ?? {
+                id: mapped.id,
+                name: mapped.name,
+                phone: mapped.phone,
+                whatsapp_lid: mapped.whatsapp_lid,
+                profile_pic_url: null,
+                notes: null,
+                wa_conversation_at: null,
+                wa_archived: false,
+                created_at: mapped.created_at,
+                updated_at: mapped.updated_at,
+              }),
+              ...mapped,
+            },
+          };
+        }),
+      );
     };
 
     socket.on('ticket.created', onCreated);
@@ -258,16 +314,24 @@ export function useContacts() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const sortByName = useCallback((list: Contact[]) => {
+    return [...list].sort((a, b) =>
+      (a.name || a.phone || '').localeCompare(b.name || b.phone || '', 'pt-BR', {
+        sensitivity: 'base',
+      }),
+    );
+  }, []);
+
   const refetch = useCallback(async () => {
     try {
       const data = await api<any[]>('/contacts');
-      setContacts((data || []).map(mapContact));
+      setContacts(sortByName((data || []).map(mapContact)));
     } catch (err) {
       console.error('Error fetching contacts:', err);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [sortByName]);
 
   useEffect(() => {
     refetch();
@@ -283,17 +347,26 @@ export function useContacts() {
       const mapped = mapContact(payload.contact);
       setContacts((prev) => {
         const idx = prev.findIndex((c) => c.id === mapped.id);
-        if (idx === -1) return [...prev, mapped].sort((a, b) => a.name.localeCompare(b.name));
+        if (idx === -1) return sortByName([...prev, mapped]);
         const next = [...prev];
         next[idx] = mapped;
-        return next;
+        return sortByName(next);
       });
     };
+    const onDeleted = (payload: { id?: string }) => {
+      if (!payload?.id) {
+        void refetch();
+        return;
+      }
+      setContacts((prev) => prev.filter((c) => c.id !== payload.id));
+    };
     socket.on('contact.updated', onContact);
+    socket.on('contact.deleted', onDeleted);
     return () => {
       socket.off('contact.updated', onContact);
+      socket.off('contact.deleted', onDeleted);
     };
-  }, [refetch]);
+  }, [refetch, sortByName]);
 
   return { contacts, loading, refetch };
 }

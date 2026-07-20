@@ -2,19 +2,29 @@ import type { ReactNode } from 'react';
 import type { Ticket } from '../../types';
 import { departmentLabel } from '../../lib/mappers';
 import { ContactAvatar } from '../ContactAvatar';
+import { UserCheck } from 'lucide-react';
 
 interface ChatHeaderProps {
   ticket: Ticket;
+  /** Show "Assumir atendimento" in the top bar (unassigned open ticket). */
+  showAssume?: boolean;
+  onAssume?: () => void;
   actions?: ReactNode;
   extras?: ReactNode;
 }
 
-export function ChatHeader({ ticket, actions, extras }: ChatHeaderProps) {
+export function ChatHeader({
+  ticket,
+  showAssume,
+  onAssume,
+  actions,
+  extras,
+}: ChatHeaderProps) {
   const photo = ticket.contact?.profile_pic_url ?? null;
 
   return (
     <div className="p-3 border-b border-ink-700 bg-ink-900 flex items-center gap-3 relative">
-      <div className="relative">
+      <div className="relative flex-shrink-0">
         <ContactAvatar
           name={ticket.contact?.name}
           profilePicUrl={photo}
@@ -53,7 +63,19 @@ export function ChatHeader({ ticket, actions, extras }: ChatHeaderProps) {
           )}
         </p>
       </div>
-      {actions}
+      <div className="flex items-center gap-1.5 flex-shrink-0">
+        {showAssume && onAssume && (
+          <button
+            type="button"
+            onClick={onAssume}
+            className="btn-primary text-xs px-3 py-1.5 whitespace-nowrap"
+          >
+            <UserCheck className="w-3.5 h-3.5" />
+            Assumir atendimento
+          </button>
+        )}
+        {actions}
+      </div>
       {extras}
     </div>
   );

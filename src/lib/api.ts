@@ -38,7 +38,9 @@ export async function api<T = unknown>(path: string, options: RequestInit = {}):
 export function mediaUrl(path: string | null | undefined): string | null {
   if (!path) return null;
   if (path.startsWith('http') || path.startsWith('blob:') || path.startsWith('data:')) return path;
-  const base = (import.meta.env.VITE_WS_URL || 'http://localhost:3001').replace(/\/$/, '');
+  // Prefer API origin without /api suffix (static /uploads is served at host root).
+  const api = (import.meta.env.VITE_API_URL || 'http://localhost:3001/api').replace(/\/$/, '');
+  const base = (import.meta.env.VITE_WS_URL || api.replace(/\/api$/, '') || 'http://localhost:3001').replace(/\/$/, '');
   return `${base}${path.startsWith('/') ? path : `/${path}`}`;
 }
 

@@ -40,6 +40,9 @@ export interface Contact {
   whatsapp_lid: string | null;
   profile_pic_url: string | null;
   notes: string | null;
+  /** conversationTimestamp do WA Web — ordena o Tudo. */
+  wa_conversation_at: string | null;
+  wa_archived: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -64,6 +67,17 @@ export interface WhatsappGroupMessage {
   timestamp: string;
 }
 
+/** Preview da última mensagem na lista (estilo WhatsApp). */
+export interface TicketLastMessage {
+  id: string;
+  body: string | null;
+  media_type: MessageType;
+  sender_type: SenderType;
+  created_at: string;
+  deleted_by_client: boolean;
+  deleted_for_client: boolean;
+}
+
 export interface Ticket {
   id: string;
   contact_id: string;
@@ -81,6 +95,8 @@ export interface Ticket {
   contact?: Contact;
   assigned_agent?: Profile | null;
   tags?: Tag[];
+  /** Última mensagem — preview na lista de conversas. */
+  last_message?: TicketLastMessage | null;
   /** Pending hand-off — assignee unchanged until accept. */
   pending_transfer_to?: string | null;
   pending_transfer_from?: string | null;
@@ -170,6 +186,7 @@ export interface AutoMessageSettings {
   inactivity_warning_minutes: number;
   inactivity_closing_message: string;
   inactivity_closing_minutes: number;
+  satisfaction_form_url: string;
   updated_at: string;
 }
 

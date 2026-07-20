@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
-import { AuthProvider, useAuth } from './context/AuthContext';
+import { AuthProvider } from './context/AuthContext';
+import { useAuth } from './context/useAuth';
 import { AuthScreen } from './components/AuthScreen';
 import { Sidebar, type TabId } from './components/layout/Sidebar';
 import { Dashboard } from './components/views/Dashboard';
@@ -375,7 +376,11 @@ function AppContent() {
             onSelectedTicketChange={handleSelectedTicketChange}
           />
         )}
-        {activeTab === 'contacts' && <ContactsView onStartConversation={handleStartConversation} />}
+        {activeTab === 'contacts' && (
+          <div className="flex-1 min-h-0">
+            <ContactsView onStartConversation={handleStartConversation} />
+          </div>
+        )}
         {activeTab === 'users' && profile.role === 'admin' && <UsersView />}
         {activeTab === 'whatsapp' && profile.role === 'admin' && <WhatsappView />}
         {activeTab === 'auto-messages' && profile.role === 'admin' && <AutoMessagesView />}

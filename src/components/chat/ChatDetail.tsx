@@ -7,7 +7,7 @@ import {
 } from '../../hooks/useData';
 import { api, mediaUrl, uploadFile } from '../../lib/api';
 import { departmentLabel, mapMessage, toApiMediaType } from '../../lib/mappers';
-import { useAuth } from '../../context/AuthContext';
+import { useAuth } from '../../context/useAuth';
 import type { Ticket, Message, Tag, Profile, MessageType } from '../../types';
 import { ContactAvatar } from '../ContactAvatar';
 import { ChatHeader } from './ChatHeader';
@@ -475,6 +475,8 @@ export function ChatDetail({
   const isFinished = ticket.status === 'finished';
   const canInteract = !isFinished && isAssignedToMe;
   const needsAssume = !isFinished && !ticket.assigned_to;
+  /** Header: assumir fila vazia OU reabrir ticket finalizado. */
+  const showAssumeInHeader = needsAssume || isFinished;
   const isMirrorMode =
     profile?.role === 'admin' &&
     !!ticket.assigned_to &&
@@ -548,13 +550,10 @@ export function ChatDetail({
       {/* Chat header */}
       <ChatHeader
         ticket={ticket}
+        showAssume={showAssumeInHeader}
+        onAssume={onAssign}
         actions={
           <div className="flex items-center gap-1">
-            {needsAssume && (
-              <button onClick={onAssign} className="btn-primary text-xs px-3 py-1.5">
-                Assumir Atendimento
-              </button>
-            )}
             {canInteract && ticket.status === 'attending' && (
               <button onClick={onFinish} className="btn-secondary text-xs px-3 py-1.5 text-success-500">
                 <CheckCircle className="w-3.5 h-3.5" />
@@ -903,7 +902,7 @@ export function ChatDetail({
               onClick={onAssign}
               className="pointer-events-auto btn-primary text-sm px-5 py-2.5 shadow-xl"
             >
-              Assumir Conversa
+              Assumir atendimento
             </button>
           </div>
         )}
@@ -916,7 +915,7 @@ export function ChatDetail({
       {/* Input area */}
       {isFinished ? (
         <div className="border-t border-ink-700 bg-ink-900 p-4 text-center text-sm text-ink-300">
-          Este ticket foi finalizado. Inicie uma nova conversa na agenda de contatos para reabrir o atendimento.
+          Este ticket foi finalizado. Use <span className="text-white font-medium">Assumir atendimento</span> no topo para reabrir.
         </div>
       ) : isMirrorMode ? (
         <div className="border-t border-ink-700 bg-ink-900 p-4 text-center text-sm text-ink-300">
