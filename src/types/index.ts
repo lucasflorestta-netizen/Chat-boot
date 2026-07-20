@@ -169,6 +169,7 @@ export interface NpsRating {
 export interface AutoMessageSettings {
   id: string;
   greeting_message: string;
+  protocol_name: string;
   bot_menu_active: boolean;
   bot_menu_message: string;
   takeover_message: string;

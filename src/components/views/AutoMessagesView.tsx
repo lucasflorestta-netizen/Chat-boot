@@ -3,7 +3,7 @@ import { useAutoMessageSettings } from '../../hooks/useData';
 import { api } from '../../lib/api';
 import { mapAutoSettings } from '../../lib/mappers';
 import type { AutoMessageSettings } from '../../types';
-import { Save, Loader2, MessageSquare, Bot, UserCheck, CheckCircle, Star, Power, Check, AlertCircle, Moon, Clock, Link2 } from 'lucide-react';
+import { Save, Loader2, MessageSquare, Bot, UserCheck, CheckCircle, Star, Power, Check, AlertCircle, Moon, Clock, Link2, Hash } from 'lucide-react';
 
 export function AutoMessagesView() {
   const { settings, loading, refetch } = useAutoMessageSettings();
@@ -55,6 +55,7 @@ export function AutoMessagesView() {
         method: 'PUT',
         body: JSON.stringify({
           greetingMessage: form.greeting_message,
+          protocolName: form.protocol_name,
           botMenuActive: form.bot_menu_active,
           botMenuMessage: form.bot_menu_message,
           takeoverMessage: form.takeover_message,
@@ -159,6 +160,9 @@ export function AutoMessagesView() {
               rows={3}
               className="input resize-none"
             />
+            <p className="mt-2 text-xs text-ink-300">
+              Use {'{{protocolName}}'} para o nome e {'{{protocol}}'} para o número.
+            </p>
           </SettingCard>
 
           <SettingCard
@@ -216,6 +220,23 @@ export function AutoMessagesView() {
               className="input resize-none"
               placeholder="No momento estamos fora do horário de atendimento. Retornaremos assim que possível."
             />
+          </SettingCard>
+
+          <SettingCard
+            icon={<Hash className="w-5 h-5" />}
+            title="Nome do Protocolo"
+            description="Como o protocolo é chamado nas mensagens. Use {{protocolName}} nos textos de automação."
+          >
+            <input
+              type="text"
+              value={form.protocol_name}
+              onChange={(e) => setForm({ ...form, protocol_name: e.target.value })}
+              className="input"
+              placeholder="protocolo de atendimento"
+            />
+            <p className="mt-2 text-xs text-ink-300">
+              O número do protocolo continua em {'{{protocol}}'}.
+            </p>
           </SettingCard>
         </div>
 

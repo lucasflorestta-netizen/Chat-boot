@@ -304,6 +304,8 @@ export function mapAutoSettings(raw: any): AutoMessageSettings {
   return {
     id: raw.id,
     greeting_message: raw.greetingMessage ?? raw.greeting_message ?? '',
+    protocol_name:
+      raw.protocolName ?? raw.protocol_name ?? 'protocolo de atendimento',
     bot_menu_active: raw.botMenuActive ?? raw.bot_menu_active ?? true,
     bot_menu_message: raw.botMenuMessage ?? raw.bot_menu_message ?? '',
     takeover_message: raw.takeoverMessage ?? raw.takeover_message ?? '',
