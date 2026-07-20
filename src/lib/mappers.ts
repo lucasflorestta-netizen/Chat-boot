@@ -340,6 +340,10 @@ export function mapAutoSettings(raw: any): AutoMessageSettings {
     nps_question: raw.npsQuestion ?? raw.nps_question ?? '',
     nps_active: raw.npsActive ?? raw.nps_active ?? true,
     after_hours_message: raw.afterHoursMessage ?? raw.after_hours_message ?? '',
+    agents_busy_message:
+      raw.agentsBusyMessage ??
+      raw.agents_busy_message ??
+      'Todos os nossos atendentes estão ocupados no momento. Aguarde na fila que em breve você será atendido.',
     business_hours_enabled:
       raw.businessHoursEnabled ?? raw.business_hours_enabled ?? false,
     business_hours_start:

@@ -3,7 +3,7 @@ import { useAutoMessageSettings } from '../../hooks/useData';
 import { api } from '../../lib/api';
 import { mapAutoSettings } from '../../lib/mappers';
 import type { AutoMessageSettings } from '../../types';
-import { Save, Loader2, MessageSquare, Bot, UserCheck, CheckCircle, Star, Power, Check, AlertCircle, Moon, Clock, Link2, Hash } from 'lucide-react';
+import { Save, Loader2, MessageSquare, Bot, UserCheck, CheckCircle, Star, Power, Check, AlertCircle, Moon, Clock, Link2, Hash, Users } from 'lucide-react';
 
 export function AutoMessagesView() {
   const { settings, loading, refetch } = useAutoMessageSettings();
@@ -63,6 +63,7 @@ export function AutoMessagesView() {
           npsQuestion: form.nps_question,
           npsActive: form.nps_active,
           afterHoursMessage: form.after_hours_message,
+          agentsBusyMessage: form.agents_busy_message,
           inactivityEnabled: form.inactivity_enabled,
           inactivityWarningMessage: form.inactivity_warning_message,
           inactivityWarningMinutes: warnMin,
@@ -220,6 +221,23 @@ export function AutoMessagesView() {
               className="input resize-none"
               placeholder="No momento estamos fora do horário de atendimento. Retornaremos assim que possível."
             />
+          </SettingCard>
+
+          <SettingCard
+            icon={<Users className="w-5 h-5" />}
+            title="Mensagem quando agentes estão ocupados"
+            description="Enviada quando o cliente escolhe o setor na URA e nenhum atendente está disponível (ocupados, offline ou fora do horário). Deixe em branco para desligar."
+          >
+            <textarea
+              value={form.agents_busy_message}
+              onChange={(e) => setForm({ ...form, agents_busy_message: e.target.value })}
+              rows={3}
+              className="input resize-none"
+              placeholder="Todos os nossos atendentes estão ocupados no momento. Aguarde na fila que em breve você será atendido."
+            />
+            <p className="mt-2 text-xs text-ink-300">
+              Opcional: use {'{{protocolName}}'} e {'{{protocol}}'}.
+            </p>
           </SettingCard>
 
           <SettingCard
