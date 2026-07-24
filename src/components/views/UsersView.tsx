@@ -20,7 +20,6 @@ import {
   X,
   Clock,
   Pencil,
-  Calendar,
   Plus,
   Hash,
 } from 'lucide-react';
@@ -85,18 +84,18 @@ export function UsersView() {
         />
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="flex flex-wrap gap-3">
         {profiles.map((p) => (
-          <div key={p.id} className="card p-4 hover:border-ink-600 transition-colors">
-            <div className="flex items-start gap-3">
+          <div key={p.id} className="card p-3 w-[280px] hover:border-ink-600 transition-colors">
+            <div className="flex items-start gap-2.5">
               <ContactAvatar
                 name={p.name}
                 profilePicUrl={p.avatar_url}
-                size="md"
+                size="sm"
                 rounded="lg"
               />
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5">
                   <p className="text-sm font-semibold text-white truncate">{p.name}</p>
                   {(p.apiRole === 'ADMIN' || p.apiRole === 'SUPERVISOR') && (
                     <Shield className="w-3.5 h-3.5 text-warning-400 flex-shrink-0" />
@@ -105,11 +104,11 @@ export function UsersView() {
                     <span className="badge bg-brand-500/20 text-brand-300 text-[10px]">Você</span>
                   )}
                 </div>
-                <p className="text-xs text-ink-300 truncate">
+                <p className="text-[11px] text-ink-300 truncate">
                   @{p.username}{p.email ? ` · ${p.email}` : ''}
                 </p>
-                <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
-                  <span className={`badge text-xs ${
+                <div className="flex items-center gap-1 mt-1 flex-wrap">
+                  <span className={`badge text-[10px] ${
                     p.apiRole === 'ADMIN'
                       ? 'bg-warning-500/20 text-warning-400'
                       : p.apiRole === 'SUPERVISOR'
@@ -120,104 +119,47 @@ export function UsersView() {
                   </span>
                   {p.sectors?.length ? (
                     p.sectors.map((s) => (
-                      <span key={s.id} className="badge bg-ink-700 text-ink-200 text-xs">
+                      <span key={s.id} className="badge bg-ink-700 text-ink-200 text-[10px]">
                         {s.name}
                       </span>
                     ))
                   ) : (
-                    <span className="badge bg-ink-700 text-ink-200 text-xs">
+                    <span className="badge bg-ink-700 text-ink-200 text-[10px]">
                       {departmentLabel(p.department)}
                     </span>
                   )}
-                  <span className={`badge text-xs ${agentStatusBadgeClass(p.status)}`}>
+                  <span className={`badge text-[10px] ${agentStatusBadgeClass(p.status)}`}>
                     {agentStatusLabel(p.status)}
                   </span>
                 </div>
               </div>
-            </div>
-
-            <div className="mt-3 pt-3 border-t border-ink-700 space-y-1.5 text-xs">
-              <div className="flex items-center justify-between">
-                <span className="text-ink-300 flex items-center gap-1.5">
-                  <Hash className="w-3 h-3" />
-                  Ramal
-                </span>
-                <span className={`font-medium ${p.ramal ? 'text-white' : 'text-ink-300'}`}>
-                  {p.ramal || '—'}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-ink-300 flex items-center gap-1.5">
-                  <Clock className="w-3 h-3" />
-                  Expediente
-                </span>
-                <span className={`font-medium ${p.work_start && p.work_end ? 'text-white' : 'text-ink-300'}`}>
-                  {p.work_start && p.work_end
-                    ? `${p.work_start.slice(0, 5)} - ${p.work_end.slice(0, 5)}`
-                    : 'Não configurado'}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-ink-300 flex items-center gap-1.5">
-                  <Calendar className="w-3 h-3" />
-                  Almoço
-                </span>
-                <span className={`font-medium ${p.lunch_start && p.lunch_end ? 'text-white' : 'text-ink-300'}`}>
-                  {p.lunch_start && p.lunch_end
-                    ? `${p.lunch_start.slice(0, 5)} - ${p.lunch_end.slice(0, 5)}`
-                    : 'Não configurado'}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-ink-300">Conversas simultâneas</span>
-                <span className="text-white font-medium">{p.max_concurrent_chats}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-ink-300">Conta</span>
-                <span className={`font-medium ${p.is_active ? 'text-success-500' : 'text-danger-400'}`}>
-                  {p.is_active ? 'Ativa' : 'Inativa'}
-                </span>
-              </div>
-            </div>
-
-            {p.work_start && p.work_end ? (
-              <ScheduleBar
-                workStart={p.work_start}
-                workEnd={p.work_end}
-                lunchStart={p.lunch_start}
-                lunchEnd={p.lunch_end}
-              />
-            ) : (
-              <p className="mt-3 text-[11px] text-ink-400">Configure o expediente na edição do usuário.</p>
-            )}
-
-            {p.lunch_start && p.lunch_end && (
-              <p className="mt-2 text-[11px] text-ink-400">
-                Offline automático {LUNCH_AUTO_OFFLINE_LEAD_MINUTES} min antes do almoço; volta a Disponível ao terminar.
-              </p>
-            )}
-            <div className="flex gap-2 mt-3">
-              <button onClick={() => setEditing(p)} className="btn-secondary text-xs flex-1">
-                <Pencil className="w-3 h-3" />
-                Editar
-              </button>
-              {p.id !== currentUser?.id && (
+              <div className="flex items-center gap-0.5 shrink-0 -mt-0.5 -mr-1">
                 <button
-                  onClick={async () => {
-                    if (confirm(`Remover ${p.name}?`)) {
-                      try {
-                        await api(`/users/${p.id}`, { method: 'DELETE' });
-                        refetch();
-                      } catch (err) {
-                        alert(err instanceof Error ? err.message : 'Falha ao remover');
-                      }
-                    }
-                  }}
-                  className="btn-ghost text-xs text-danger-400"
+                  onClick={() => setEditing(p)}
+                  className="btn-ghost p-1.5 text-ink-300 hover:text-white"
+                  title="Editar"
                 >
-                  <Trash2 className="w-3.5 h-3.5" />
+                  <Pencil className="w-3.5 h-3.5" />
                 </button>
-              )}
+                {p.id !== currentUser?.id && (
+                  <button
+                    onClick={async () => {
+                      if (confirm(`Remover ${p.name}?`)) {
+                        try {
+                          await api(`/users/${p.id}`, { method: 'DELETE' });
+                          refetch();
+                        } catch (err) {
+                          alert(err instanceof Error ? err.message : 'Falha ao remover');
+                        }
+                      }
+                    }}
+                    className="btn-ghost p-1.5 text-danger-400"
+                    title="Remover"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         ))}
@@ -463,78 +405,6 @@ function SectorsCard({
             })}
         </ul>
       )}
-    </div>
-  );
-}
-
-function ScheduleBar({
-  workStart,
-  workEnd,
-  lunchStart,
-  lunchEnd,
-}: {
-  workStart: string;
-  workEnd: string;
-  lunchStart: string | null;
-  lunchEnd: string | null;
-}) {
-  const toMinutes = (t: string) => {
-    const [h, m] = t.split(':').map(Number);
-    return h * 60 + m;
-  };
-
-  const totalMin = 24 * 60;
-  const ws = toMinutes(workStart);
-  const we = toMinutes(workEnd);
-  const ls = lunchStart ? toMinutes(lunchStart) : null;
-  const le = lunchEnd ? toMinutes(lunchEnd) : null;
-
-  const workLeft = (ws / totalMin) * 100;
-  const workWidth = ((we - ws) / totalMin) * 100;
-  const lunchLeft = ls !== null ? (ls / totalMin) * 100 : 0;
-  const lunchWidth = ls !== null && le !== null ? ((le - ls) / totalMin) * 100 : 0;
-  const leadStart = ls !== null ? Math.max(0, ls - LUNCH_AUTO_OFFLINE_LEAD_MINUTES) : null;
-  const leadLeft = leadStart !== null ? (leadStart / totalMin) * 100 : 0;
-  const leadWidth =
-    leadStart !== null && ls !== null
-      ? ((ls - leadStart) / totalMin) * 100
-      : 0;
-
-  return (
-    <div className="mt-3">
-      <div className="relative h-5 bg-ink-800 rounded-md overflow-hidden">
-        <div
-          className="absolute h-full bg-brand-600/40 border-x border-brand-500/50"
-          style={{ left: `${workLeft}%`, width: `${Math.max(workWidth, 0)}%` }}
-        />
-        {leadStart !== null && ls !== null && leadWidth > 0 && (
-          <div
-            className="absolute h-full bg-danger-500/35 border-x border-danger-400/50"
-            style={{ left: `${leadLeft}%`, width: `${Math.max(leadWidth, 0)}%` }}
-            title={`Offline automático ${LUNCH_AUTO_OFFLINE_LEAD_MINUTES} min antes`}
-          />
-        )}
-        {ls !== null && le !== null && (
-          <div
-            className="absolute h-full bg-warning-500/50 border-x border-warning-400/60"
-            style={{ left: `${lunchLeft}%`, width: `${Math.max(lunchWidth, 0)}%` }}
-          />
-        )}
-        {[0, 6, 12, 18, 24].map((h) => (
-          <div
-            key={h}
-            className="absolute top-0 bottom-0 w-px bg-ink-600/50"
-            style={{ left: `${(h / 24) * 100}%` }}
-          />
-        ))}
-      </div>
-      <div className="flex justify-between text-[9px] text-ink-300 mt-0.5">
-        <span>00h</span>
-        <span>06h</span>
-        <span>12h</span>
-        <span>18h</span>
-        <span>24h</span>
-      </div>
     </div>
   );
 }
