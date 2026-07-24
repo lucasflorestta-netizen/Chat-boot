@@ -167,6 +167,8 @@ export function mapAppearanceSettings(raw: any): AppearanceSettings {
     id: raw.id,
     wallpaperKey: raw.wallpaperKey ?? raw.wallpaper_key ?? 'linen',
     customImageUrl: raw.customImageUrl ?? raw.custom_image_url ?? null,
+    brandName: (raw.brandName ?? raw.brand_name ?? 'Customer Center').trim() || 'Customer Center',
+    brandLogoUrl: raw.brandLogoUrl ?? raw.brand_logo_url ?? null,
     updatedAt: iso(raw.updatedAt ?? raw.updated_at),
   };
 }

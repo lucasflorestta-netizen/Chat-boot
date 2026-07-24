@@ -171,7 +171,7 @@ function AuthenticatedApp() {
         {
           avatarUrl: ticket.contact?.profile_pic_url ?? null,
           ticketId: ticket.id,
-          label: 'HelpDesk',
+          label: 'Customer Center',
         },
       );
     };
@@ -468,7 +468,7 @@ function AuthenticatedApp() {
             />
             <div className="min-w-0 flex-1 pt-0.5">
               <p className="text-[11px] font-medium text-[#25D366] leading-none mb-1">
-                {n.label ?? (n.type === 'ticket' ? 'HelpDesk' : 'WhatsApp')}
+                {n.label ?? (n.type === 'ticket' ? 'Customer Center' : 'WhatsApp')}
               </p>
               <p className="text-[15px] font-semibold text-gray-900 truncate leading-tight">
                 {n.title}

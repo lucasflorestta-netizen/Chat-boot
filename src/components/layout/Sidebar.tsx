@@ -27,8 +27,15 @@ import {
   agentStatusBadgeClass,
   agentStatusLabel,
 } from '../../lib/agentStatus';
+import {
+  DEFAULT_BRAND_NAME,
+  readStoredBrand,
+  resolveBrandLogoSrc,
+  writeStoredBrand,
+} from '../../lib/brand';
 import type { AgentStatus } from '../../types';
 import { AvatarUploadButton } from '../AvatarUploadButton';
+import { useAppearanceSettings } from '../../hooks/useData';
 import { useWhatsappConnection } from '../../context/useWhatsappConnection';
 import { NotepadWindow } from '../notepad/NotepadWindow';
 import { PresenceMonitorPanel } from './PresenceMonitorPanel';
@@ -88,6 +95,13 @@ export function Sidebar({
 }: SidebarProps) {
   const { profile, signOut, refreshProfile, patchProfile } = useAuth();
   const { connection, loading: waLoading } = useWhatsappConnection();
+  const { settings: appearance } = useAppearanceSettings();
+  const storedBrand = readStoredBrand();
+  const brandName =
+    appearance?.brandName?.trim() || storedBrand.name || DEFAULT_BRAND_NAME;
+  const brandLogoSrc = resolveBrandLogoSrc(
+    appearance?.brandLogoUrl ?? storedBrand.logo,
+  );
   const [statusSaving, setStatusSaving] = useState(false);
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
   const [presenceOpen, setPresenceOpen] = useState(false);
@@ -113,6 +127,11 @@ export function Sidebar({
     return !item.adminOnly || canManageWhatsapp;
   });
   const hasOpenNotepad = notepadWindows.some((n) => !n.minimized);
+
+  useEffect(() => {
+    if (!appearance) return;
+    writeStoredBrand(appearance.brandName, appearance.brandLogoUrl);
+  }, [appearance]);
 
   useEffect(() => {
     if (!statusMenuOpen) return;
@@ -179,11 +198,20 @@ export function Sidebar({
     <aside className="w-64 bg-ink-900 border-r border-ink-700 flex flex-col h-screen sticky top-0">
       <div className="p-4 border-b border-ink-700">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center shadow-lg shadow-brand-900/40">
-            <Headphones className="w-5 h-5 text-white" />
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center shadow-lg shadow-brand-900/40 overflow-hidden">
+            <img
+              src={brandLogoSrc}
+              alt={brandName}
+              className="w-full h-full object-cover"
+              onError={(e) => {
+                e.currentTarget.style.display = 'none';
+                e.currentTarget.nextElementSibling?.classList.remove('hidden');
+              }}
+            />
+            <Headphones className="w-5 h-5 text-white hidden" />
           </div>
           <div>
-            <h1 className="text-sm font-bold text-white leading-tight">HelpDesk CRM</h1>
+            <h1 className="text-sm font-bold text-white leading-tight">{brandName}</h1>
             <p className="text-xs text-ink-300">WhatsApp</p>
           </div>
         </div>

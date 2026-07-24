@@ -220,6 +220,8 @@ export interface AppearanceSettings {
   id: string;
   wallpaperKey: string;
   customImageUrl: string | null;
+  brandName: string;
+  brandLogoUrl: string | null;
   updatedAt: string;
 }
 

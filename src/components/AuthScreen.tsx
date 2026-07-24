@@ -1,6 +1,11 @@
 import { useState } from 'react';
 import { useAuth } from '../context/useAuth';
 import { Headphones, Loader2, Mail, Lock, User, AlertCircle, RefreshCw } from 'lucide-react';
+import {
+  DEFAULT_BRAND_NAME,
+  readStoredBrand,
+  resolveBrandLogoSrc,
+} from '../lib/brand';
 
 export function AuthScreen() {
   const { signIn, signUp, session, profileError, refreshProfile } = useAuth();
@@ -11,6 +16,9 @@ export function AuthScreen() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [retrying, setRetrying] = useState(false);
+  const storedBrand = readStoredBrand();
+  const brandName = storedBrand.name || DEFAULT_BRAND_NAME;
+  const brandLogoSrc = resolveBrandLogoSrc(storedBrand.logo);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -56,10 +64,19 @@ export function AuthScreen() {
       <div className="relative w-full max-w-md">
         <div className="card p-8 shadow-2xl">
           <div className="flex flex-col items-center mb-8">
-            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center mb-4 shadow-lg shadow-brand-900/50">
-              <Headphones className="w-8 h-8 text-white" />
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center mb-4 shadow-lg shadow-brand-900/50 overflow-hidden">
+              <img
+                src={brandLogoSrc}
+                alt={brandName}
+                className="w-full h-full object-cover"
+                onError={(e) => {
+                  e.currentTarget.style.display = 'none';
+                  e.currentTarget.nextElementSibling?.classList.remove('hidden');
+                }}
+              />
+              <Headphones className="w-8 h-8 text-white hidden" />
             </div>
-            <h1 className="text-2xl font-bold text-white">HelpDesk CRM</h1>
+            <h1 className="text-2xl font-bold text-white">{brandName}</h1>
             <p className="text-sm text-ink-300 mt-1">Atendimento WhatsApp Integrado</p>
           </div>
 

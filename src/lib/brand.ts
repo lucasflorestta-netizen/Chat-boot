@@ -8,10 +8,12 @@ const BRAND_LOGO_KEY = 'brand_logo';
 
 export function readStoredBrand(): { name: string; logo: string } {
   try {
-    const name = localStorage.getItem(BRAND_NAME_KEY)?.trim();
+    const rawName = localStorage.getItem(BRAND_NAME_KEY)?.trim();
+    const name =
+      !rawName || rawName === 'HelpDesk CRM' ? DEFAULT_BRAND_NAME : rawName;
     const logo = localStorage.getItem(BRAND_LOGO_KEY)?.trim();
     return {
-      name: name || DEFAULT_BRAND_NAME,
+      name,
       logo: logo || DEFAULT_BRAND_LOGO,
     };
   } catch {
