@@ -12,15 +12,21 @@ export function getSocket(): Socket | null {
 
 export function connectSocket(): Socket {
   const token = getToken();
-  if (socket?.connected && lastToken === token) return socket;
 
   if (socket) {
     socket.auth = { token };
     if (lastToken !== token) {
+      lastToken = token;
+      // Troca de sessão: derruba e reconecta com o token novo.
       socket.disconnect();
       socket.connect();
+      return socket;
     }
     lastToken = token;
+    // Mesmo token, mas socket caiu (restart da API, rede, etc.) — reconectar.
+    if (!socket.connected) {
+      socket.connect();
+    }
     return socket;
   }
 
@@ -28,6 +34,9 @@ export function connectSocket(): Socket {
     autoConnect: true,
     auth: { token },
     transports: ['websocket', 'polling'],
+    reconnection: true,
+    reconnectionAttempts: Infinity,
+    reconnectionDelay: 1000,
   });
   lastToken = token;
   return socket;

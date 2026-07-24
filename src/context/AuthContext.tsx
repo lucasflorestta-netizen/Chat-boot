@@ -66,9 +66,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (mapped.id !== user.id) return;
       setProfile((prev) => (prev ? { ...prev, ...mapped } : mapped));
     };
+    // Garante WS (e presença online) ao voltar para a aba / focar a janela.
+    const ensureSocket = () => {
+      if (document.visibilityState === 'hidden') return;
+      connectSocket();
+    };
     socket.on('user.updated', onUserUpdated);
+    document.addEventListener('visibilitychange', ensureSocket);
+    window.addEventListener('focus', ensureSocket);
     return () => {
       socket.off('user.updated', onUserUpdated);
+      document.removeEventListener('visibilitychange', ensureSocket);
+      window.removeEventListener('focus', ensureSocket);
     };
   }, [user?.id]);
 

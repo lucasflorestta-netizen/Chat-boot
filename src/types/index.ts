@@ -59,6 +59,9 @@ export interface WhatsappGroup {
   owner: string | null;
   creation: string | null;
   profilePicUrl: string | null;
+  unreadCount?: number;
+  conversationAt?: string | null;
+  lastMessage?: WhatsappGroupMessage | null;
 }
 
 export interface WhatsappGroupMessage {
@@ -67,7 +70,21 @@ export interface WhatsappGroupMessage {
   fromMe: boolean;
   senderJid?: string | null;
   senderName?: string | null;
+  senderProfilePicUrl?: string | null;
   text: string;
+  mediaType?: string | null;
+  mediaUrl?: string | null;
+  mediaName?: string | null;
+  replyTo?: {
+    id: string;
+    text: string;
+    senderName?: string | null;
+    fromMe: boolean;
+    mediaType?: string | null;
+  } | null;
+  edited?: boolean;
+  deleted?: boolean;
+  starred?: boolean;
   timestamp: string;
 }
 
