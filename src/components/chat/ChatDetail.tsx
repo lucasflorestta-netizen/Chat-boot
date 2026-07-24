@@ -966,17 +966,6 @@ export function ChatDetail({
           </button>
         )}
 
-        {needsAssume && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
-            <button
-              type="button"
-              onClick={onAssign}
-              className="pointer-events-auto btn-primary text-sm px-5 py-2.5 shadow-xl"
-            >
-              Assumir atendimento
-            </button>
-          </div>
-        )}
       </div>
 
       {fileError && (
