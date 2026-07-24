@@ -139,6 +139,15 @@ export function UsersView() {
             <div className="mt-3 pt-3 border-t border-ink-700 space-y-1.5 text-xs">
               <div className="flex items-center justify-between">
                 <span className="text-ink-300 flex items-center gap-1.5">
+                  <Hash className="w-3 h-3" />
+                  Ramal
+                </span>
+                <span className={`font-medium ${p.ramal ? 'text-white' : 'text-ink-300'}`}>
+                  {p.ramal || '—'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-ink-300 flex items-center gap-1.5">
                   <Clock className="w-3 h-3" />
                   Expediente
                 </span>
@@ -698,6 +707,7 @@ function EditUserModal({
   const [name, setName] = useState(user.name);
   const [username, setUsername] = useState(user.username);
   const [email, setEmail] = useState(user.email || '');
+  const [ramal, setRamal] = useState(user.ramal || '');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState<ApiUserRole>(normalizeApiRole(user.apiRole));
   const [sectorIds, setSectorIds] = useState<string[]>(
@@ -776,6 +786,7 @@ function EditUserModal({
           name: trimmedName,
           username: trimmedUsername,
           email: trimmedEmail || null,
+          ramal: ramal.trim() || null,
           ...(trimmedPassword ? { password: trimmedPassword } : {}),
           role: toApiRole(role),
           sectorIds,
@@ -832,7 +843,7 @@ function EditUserModal({
               <label className="label">Usuário (login)</label>
               <input value={username} onChange={(e) => setUsername(e.target.value)} className="input" />
             </div>
-            <div className="col-span-2">
+            <div>
               <label className="label">E-mail</label>
               <input
                 type="email"
@@ -840,6 +851,16 @@ function EditUserModal({
                 onChange={(e) => setEmail(e.target.value)}
                 className="input"
                 placeholder="Opcional"
+              />
+            </div>
+            <div>
+              <label className="label">Ramal</label>
+              <input
+                value={ramal}
+                onChange={(e) => setRamal(e.target.value)}
+                className="input"
+                placeholder="Ex: 2041"
+                maxLength={32}
               />
             </div>
             <div className="col-span-2">
@@ -902,29 +923,6 @@ function EditUserModal({
           <div className="flex items-center gap-2">
             <Clock className="w-4 h-4 text-brand-400" />
             <p className="text-xs font-semibold text-ink-200 uppercase tracking-wide">Horário de Atendimento</p>
-          </div>
-
-          <div className="card p-3 bg-ink-800">
-            <ScheduleBar
-              workStart={workStart}
-              workEnd={workEnd}
-              lunchStart={lunchStart || null}
-              lunchEnd={lunchEnd || null}
-            />
-            <div className="flex items-center gap-4 mt-2 text-[10px] flex-wrap">
-              <span className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-sm bg-brand-600/60" />
-                <span className="text-ink-300">Expediente</span>
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-sm bg-danger-500/50" />
-                <span className="text-ink-300">Pré-almoço (offline)</span>
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-sm bg-warning-500/60" />
-                <span className="text-ink-300">Almoço</span>
-              </span>
-            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3">

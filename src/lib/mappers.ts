@@ -150,6 +150,7 @@ export function mapProfile(raw: any): Profile {
     sectorIds,
     sectors,
     max_concurrent_chats: raw.limiteSimultaneo ?? raw.max_concurrent_chats ?? 3,
+    ramal: raw.ramal ?? null,
     work_start: raw.workStart ?? raw.work_start ?? null,
     work_end: raw.workEnd ?? raw.work_end ?? null,
     lunch_start: raw.lunchStart ?? raw.lunch_start ?? null,

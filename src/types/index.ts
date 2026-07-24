@@ -26,6 +26,8 @@ export interface Profile {
   sectorIds: string[];
   sectors: Array<{ id: string; name: string; triageOption?: number }>;
   max_concurrent_chats: number;
+  /** Ramal interno (informativo). */
+  ramal: string | null;
   work_start: string | null;
   work_end: string | null;
   lunch_start: string | null;
