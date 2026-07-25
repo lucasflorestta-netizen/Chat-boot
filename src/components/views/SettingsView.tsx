@@ -3,7 +3,7 @@ import { useAutoMessageSettings } from '../../hooks/useData';
 import { api } from '../../lib/api';
 import { mapAutoSettings } from '../../lib/mappers';
 import type { AutoMessageSettings } from '../../types';
-import { Save, Loader2, Clock, Check, AlertCircle, Power, UtensilsCrossed } from 'lucide-react';
+import { Save, Loader2, Clock, Check, AlertCircle, UtensilsCrossed } from 'lucide-react';
 
 const TIME_OPTIONS: string[] = [];
 for (let h = 0; h < 24; h++) {
@@ -11,6 +11,17 @@ for (let h = 0; h < 24; h++) {
     TIME_OPTIONS.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
   }
 }
+
+/** ISO weekdays 1=Mon … 7=Sun */
+const WEEKDAY_OPTIONS: { value: number; label: string }[] = [
+  { value: 1, label: 'Seg' },
+  { value: 2, label: 'Ter' },
+  { value: 3, label: 'Qua' },
+  { value: 4, label: 'Qui' },
+  { value: 5, label: 'Sex' },
+  { value: 6, label: 'Sáb' },
+  { value: 7, label: 'Dom' },
+];
 
 export function SettingsView() {
   const { settings, loading, refetch } = useAutoMessageSettings();
@@ -28,6 +39,15 @@ export function SettingsView() {
     return () => clearTimeout(t);
   }, [feedback]);
 
+  const toggleDay = (day: number) => {
+    if (!form) return;
+    const days = form.business_days ?? [];
+    const next = days.includes(day)
+      ? days.filter((d) => d !== day)
+      : [...days, day].sort((a, b) => a - b);
+    setForm({ ...form, business_days: next });
+  };
+
   const handleSave = async () => {
     if (!form) return;
 
@@ -35,6 +55,14 @@ export function SettingsView() {
       setFeedback({
         type: 'error',
         message: 'O fim do expediente deve ser depois do início.',
+      });
+      return;
+    }
+
+    if (!form.business_days?.length) {
+      setFeedback({
+        type: 'error',
+        message: 'Selecione pelo menos um dia de funcionamento.',
       });
       return;
     }
@@ -48,6 +76,7 @@ export function SettingsView() {
           businessHoursEnabled: form.business_hours_enabled,
           businessHoursStart: form.business_hours_start,
           businessHoursEnd: form.business_hours_end,
+          businessDays: form.business_days,
           operatorLunchAutoStatus: form.operator_lunch_auto_status,
         }),
       });
@@ -117,11 +146,13 @@ export function SettingsView() {
               </div>
               <div>
                 <p className="text-sm font-semibold text-white">
-                  Offline automático no almoço
+                  Offline automático (almoço e fim de expediente)
                 </p>
                 <p className="text-xs text-ink-300">
-                  5 min antes do almoço o agente fica Offline (sem novos atendimentos) e
-                  volta a Disponível ao terminar. Atendimentos já atribuídos permanecem.
+                  Só com o agente logado: 5 min antes do almoço fica offline; no horário
+                  exato do fim do expediente (workEnd) também. Volta a Disponível ao
+                  terminar o almoço ou no início do próximo expediente se ainda estiver
+                  logado. Atendimentos já atribuídos permanecem.
                 </p>
               </div>
             </div>
@@ -148,34 +179,36 @@ export function SettingsView() {
           </div>
         </div>
 
-        <div className="card p-5">
-          <div className="flex items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <div
-                className={`w-10 h-10 rounded-lg flex items-center justify-center ${
-                  form.business_hours_enabled ? 'bg-success-500/20' : 'bg-ink-700'
+        <div className="card p-5 space-y-4">
+          <div className="flex items-start gap-3">
+            <div
+              className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg ${
+                form.business_hours_enabled ? 'bg-success-500/20' : 'bg-brand-500/10'
+              }`}
+            >
+              <Clock
+                className={`w-5 h-5 ${
+                  form.business_hours_enabled ? 'text-success-500' : 'text-brand-400'
                 }`}
-              >
-                <Power
-                  className={`w-5 h-5 ${
-                    form.business_hours_enabled ? 'text-success-500' : 'text-ink-300'
-                  }`}
-                />
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-white">
-                  Mensagem fora do expediente
-                </p>
-                <p className="text-xs text-ink-300">
-                  Envia a mensagem configurada em Mensagens Automáticas quando o cliente
-                  contatar fora do horário
-                </p>
-              </div>
+              />
             </div>
+            <div>
+              <p className="text-sm font-semibold text-white">Horário comercial</p>
+              <p className="mt-0.5 text-xs text-ink-300">
+                Horário de Brasília (America/Sao_Paulo). Dias não marcados e fora do
+                intervalo contam como fora do expediente. O texto da mensagem fica em
+                Mensagens Automáticas.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between gap-3 rounded-lg bg-ink-800/60 px-3 py-2.5">
+            <p className="text-sm font-medium text-white">Ativar horário comercial</p>
             <button
               type="button"
               role="switch"
               aria-checked={form.business_hours_enabled}
+              aria-label="Ativar horário comercial"
               onClick={() =>
                 setForm({ ...form, business_hours_enabled: !form.business_hours_enabled })
               }
@@ -190,95 +223,121 @@ export function SettingsView() {
               />
             </button>
           </div>
-        </div>
 
-        <div className="card p-5 space-y-4">
-          <div className="flex items-start gap-3">
-            <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-brand-500/10 text-brand-400">
-              <Clock className="w-5 h-5" />
-            </div>
-            <div>
-              <p className="text-sm font-semibold text-white">Horário de funcionamento</p>
-              <p className="mt-0.5 text-xs text-ink-300">
-                Horário de Brasília (America/Sao_Paulo). Válido todos os dias da semana.
-              </p>
-            </div>
-          </div>
+          {form.business_hours_enabled && (
+            <>
+              <div>
+                <label className="label">Dias de funcionamento</label>
+                <div className="mt-1.5 flex flex-wrap gap-2">
+                  {WEEKDAY_OPTIONS.map(({ value, label }) => {
+                    const active = form.business_days?.includes(value);
+                    return (
+                      <button
+                        key={value}
+                        type="button"
+                        onClick={() => toggleDay(value)}
+                        aria-pressed={active}
+                        className={`min-w-[2.75rem] rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                          active
+                            ? 'bg-brand-500 text-white'
+                            : 'bg-ink-700 text-ink-200 hover:bg-ink-600 hover:text-white'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="label">Início do expediente</label>
-              <select
-                value={form.business_hours_start}
-                onChange={(e) =>
-                  setForm({ ...form, business_hours_start: e.target.value })
-                }
-                className="input"
-              >
-                {TIME_OPTIONS.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="label">Fim do expediente</label>
-              <select
-                value={form.business_hours_end}
-                onChange={(e) => setForm({ ...form, business_hours_end: e.target.value })}
-                className="input"
-              >
-                {TIME_OPTIONS.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label">Início do expediente</label>
+                  <select
+                    value={form.business_hours_start}
+                    onChange={(e) =>
+                      setForm({ ...form, business_hours_start: e.target.value })
+                    }
+                    className="input"
+                  >
+                    {TIME_OPTIONS.map((t) => (
+                      <option key={t} value={t}>
+                        {t}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="label">Fim do expediente</label>
+                  <select
+                    value={form.business_hours_end}
+                    onChange={(e) => setForm({ ...form, business_hours_end: e.target.value })}
+                    className="input"
+                  >
+                    {TIME_OPTIONS.map((t) => (
+                      <option key={t} value={t}>
+                        {t}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
 
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() =>
-                setForm({
-                  ...form,
-                  business_hours_start: '08:00',
-                  business_hours_end: '18:00',
-                })
-              }
-              className="text-xs px-2.5 py-1 rounded-md bg-ink-700 text-ink-200 hover:bg-ink-600 hover:text-white transition-colors"
-            >
-              08h–18h
-            </button>
-            <button
-              type="button"
-              onClick={() =>
-                setForm({
-                  ...form,
-                  business_hours_start: '09:00',
-                  business_hours_end: '18:00',
-                })
-              }
-              className="text-xs px-2.5 py-1 rounded-md bg-ink-700 text-ink-200 hover:bg-ink-600 hover:text-white transition-colors"
-            >
-              09h–18h
-            </button>
-            <button
-              type="button"
-              onClick={() =>
-                setForm({
-                  ...form,
-                  business_hours_start: '08:00',
-                  business_hours_end: '17:00',
-                })
-              }
-              className="text-xs px-2.5 py-1 rounded-md bg-ink-700 text-ink-200 hover:bg-ink-600 hover:text-white transition-colors"
-            >
-              08h–17h
-            </button>
-          </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setForm({
+                      ...form,
+                      business_hours_start: '08:00',
+                      business_hours_end: '18:00',
+                    })
+                  }
+                  className="text-xs px-2.5 py-1 rounded-md bg-ink-700 text-ink-200 hover:bg-ink-600 hover:text-white transition-colors"
+                >
+                  08h–18h
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setForm({
+                      ...form,
+                      business_hours_start: '09:00',
+                      business_hours_end: '18:00',
+                    })
+                  }
+                  className="text-xs px-2.5 py-1 rounded-md bg-ink-700 text-ink-200 hover:bg-ink-600 hover:text-white transition-colors"
+                >
+                  09h–18h
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setForm({
+                      ...form,
+                      business_hours_start: '08:00',
+                      business_hours_end: '17:00',
+                    })
+                  }
+                  className="text-xs px-2.5 py-1 rounded-md bg-ink-700 text-ink-200 hover:bg-ink-600 hover:text-white transition-colors"
+                >
+                  08h–17h
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setForm({
+                      ...form,
+                      business_days: [1, 2, 3, 4, 5],
+                    })
+                  }
+                  className="text-xs px-2.5 py-1 rounded-md bg-ink-700 text-ink-200 hover:bg-ink-600 hover:text-white transition-colors"
+                >
+                  Seg–Sex
+                </button>
+              </div>
+            </>
+          )}
         </div>
 
         <button onClick={handleSave} disabled={saving} className="btn-primary w-full">

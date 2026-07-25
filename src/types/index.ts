@@ -205,7 +205,9 @@ export interface AutoMessageSettings {
   business_hours_enabled: boolean;
   business_hours_start: string;
   business_hours_end: string;
-  /** Offline automático 5 min antes do almoço / Disponível ao terminar. */
+  /** ISO weekdays 1=Mon … 7=Sun. */
+  business_days: number[];
+  /** Offline automático (almoço com lead / workEnd exato); só com agente logado. */
   operator_lunch_auto_status: boolean;
   inactivity_enabled: boolean;
   inactivity_warning_message: string;

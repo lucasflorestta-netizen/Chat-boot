@@ -303,7 +303,7 @@ class PdfLayout {
 
   private drawFooter() {
     this.ensureSpace(20);
-    this.drawText('NGE Helpdesk — Relatório do Dashboard', 8, false);
+    this.drawText('Customer Center — Relatório do Dashboard', 8, false);
   }
 }
 

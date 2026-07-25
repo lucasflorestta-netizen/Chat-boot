@@ -567,11 +567,11 @@ export function useWhatsappConnection() {
       );
     };
 
-    socket.on('nge-qrcode', onQr);
+    socket.on('cc-qrcode', onQr);
     socket.on('whatsapp:status', onStatus);
 
     return () => {
-      socket.off('nge-qrcode', onQr);
+      socket.off('cc-qrcode', onQr);
       socket.off('whatsapp:status', onStatus);
     };
   }, []);

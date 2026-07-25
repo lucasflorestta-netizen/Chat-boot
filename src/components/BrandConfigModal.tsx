@@ -273,7 +273,7 @@ export function BrandConfigModal({
                 placeholder="CC"
               />
               <p className="mt-1 text-xs text-ink-400">
-                Prefixo do número do protocolo (ex.: NewGen → NewGen20260720-0001).
+                Prefixo do número do protocolo (ex.: CC → CC20260720-0001).
                 Também usado em {'{{protocolName}}'} nas mensagens.
               </p>
             </div>

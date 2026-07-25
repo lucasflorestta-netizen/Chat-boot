@@ -353,6 +353,9 @@ export function mapAutoSettings(raw: any): AutoMessageSettings {
       raw.businessHoursStart ?? raw.business_hours_start ?? '08:00',
     business_hours_end:
       raw.businessHoursEnd ?? raw.business_hours_end ?? '18:00',
+    business_days: Array.isArray(raw.businessDays ?? raw.business_days)
+      ? [...(raw.businessDays ?? raw.business_days)].map(Number).filter((d) => d >= 1 && d <= 7)
+      : [1, 2, 3, 4, 5],
     operator_lunch_auto_status:
       raw.operatorLunchAutoStatus ?? raw.operator_lunch_auto_status ?? true,
     inactivity_enabled:

@@ -50,10 +50,10 @@ Login inicial: use um usuário seed da API (ex.: `admin` / `admin123`).
 
 ## Autenticação
 
-- `POST /auth/login` → JWT em `localStorage` (`nge_access_token`)
+- `POST /auth/login` → JWT em `localStorage` (`cc_access_token`)
 - `GET /auth/me` no mount se houver token
 - Socket.IO autentica com `auth.token`
 
 ## WhatsApp
 
-Conexão, QR e status vêm da API (`/whatsapp/*` + eventos `nge-qrcode` / `whatsapp:status`). Não há bridge local nem Supabase neste frontend.
+Conexão, QR e status vêm da API (`/whatsapp/*` + eventos `cc-qrcode` / `whatsapp:status`). Não há bridge local nem Supabase neste frontend.

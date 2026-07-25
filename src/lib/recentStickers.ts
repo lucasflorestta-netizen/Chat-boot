@@ -1,5 +1,18 @@
-const STORAGE_KEY = 'nge_recent_stickers';
+const STORAGE_KEY = 'cc_recent_stickers';
+const LEGACY_STORAGE_KEY = 'nge_recent_stickers';
 const MAX_RECENTS = 24;
+
+function readStorageRaw(): string | null {
+  const current = localStorage.getItem(STORAGE_KEY);
+  if (current) return current;
+  const legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
+  if (legacy) {
+    localStorage.setItem(STORAGE_KEY, legacy);
+    localStorage.removeItem(LEGACY_STORAGE_KEY);
+    return legacy;
+  }
+  return null;
+}
 
 export interface RecentSticker {
   url: string;
@@ -29,7 +42,7 @@ export function toUploadPath(url: string): string | null {
 
 export function loadRecentStickers(): RecentSticker[] {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readStorageRaw();
     if (!raw) return [];
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
@@ -57,6 +70,7 @@ export function pushRecentSticker(url: string): RecentSticker[] {
   const next = [{ url: path, at: Date.now() }, ...existing].slice(0, MAX_RECENTS);
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    localStorage.removeItem(LEGACY_STORAGE_KEY);
   } catch {
     /* ignore quota */
   }

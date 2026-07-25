@@ -1,13 +1,27 @@
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
-const TOKEN_KEY = 'nge_access_token';
+const TOKEN_KEY = 'cc_access_token';
+const LEGACY_TOKEN_KEY = 'nge_access_token';
 
 export function getToken() {
-  return localStorage.getItem(TOKEN_KEY);
+  const current = localStorage.getItem(TOKEN_KEY);
+  if (current) return current;
+  const legacy = localStorage.getItem(LEGACY_TOKEN_KEY);
+  if (legacy) {
+    localStorage.setItem(TOKEN_KEY, legacy);
+    localStorage.removeItem(LEGACY_TOKEN_KEY);
+    return legacy;
+  }
+  return null;
 }
 
 export function setToken(t: string | null) {
-  if (t) localStorage.setItem(TOKEN_KEY, t);
-  else localStorage.removeItem(TOKEN_KEY);
+  if (t) {
+    localStorage.setItem(TOKEN_KEY, t);
+    localStorage.removeItem(LEGACY_TOKEN_KEY);
+  } else {
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(LEGACY_TOKEN_KEY);
+  }
 }
 
 export async function api<T = unknown>(path: string, options: RequestInit = {}): Promise<T> {

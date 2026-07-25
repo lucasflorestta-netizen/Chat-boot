@@ -836,8 +836,7 @@ function EditUserModal({
           </div>
 
           <p className="text-[11px] text-ink-400">
-            Com almoço configurado, o agente fica Offline automaticamente {LUNCH_AUTO_OFFLINE_LEAD_MINUTES} min
-            antes do início e volta a Disponível ao terminar. Atendimentos já atribuídos permanecem com ele.
+            Com o agente logado: no horário exato do fim do expediente fica offline; com almoço, {LUNCH_AUTO_OFFLINE_LEAD_MINUTES} min antes do início até o fim. Volta a Disponível ao sair da janela se ainda estiver logado. Atendimentos já atribuídos permanecem com ele.
           </p>
 
           <div className="flex flex-wrap gap-2">
