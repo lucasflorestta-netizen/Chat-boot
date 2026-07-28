@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../../lib/api';
 import { mapContact, mapTicket } from '../../lib/mappers';
 import { useNpsRatings, useProfiles } from '../../hooks/useData';
@@ -9,17 +9,27 @@ import {
   Ticket as TicketIcon,
   Download,
   FileText,
-  TrendingUp,
   Star,
   Loader2,
   Filter,
+  Users,
+  Search,
+  X,
 } from 'lucide-react';
 import type { Ticket, Contact } from '../../types';
 import { downloadDashboardReportPdf } from '../../lib/dashboardReportPdf';
 
 interface DashboardProps {
   onNavigateToChat: () => void;
+  onOpenTicket?: (ticketId: string) => void;
 }
+
+type ByAttendantRow = {
+  assigneeId: string;
+  name: string;
+  username: string;
+  count: number;
+};
 
 function toDayInput(d: Date): string {
   const y = d.getFullYear();
@@ -35,7 +45,11 @@ function daysAgo(n: number): string {
   return toDayInput(d);
 }
 
-export function Dashboard({ onNavigateToChat }: DashboardProps) {
+function formatDayPt(isoDay: string): string {
+  return isoDay.split('-').reverse().join('/');
+}
+
+export function Dashboard({ onNavigateToChat, onOpenTicket }: DashboardProps) {
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [avgResponseTime, setAvgResponseTime] = useState<string>('—');
@@ -50,10 +64,21 @@ export function Dashboard({ onNavigateToChat }: DashboardProps) {
   const [exportingPdf, setExportingPdf] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
 
-  const [filterFrom, setFilterFrom] = useState('');
-  const [filterTo, setFilterTo] = useState('');
+  const [filterFrom, setFilterFrom] = useState(() => toDayInput(new Date()));
+  const [filterTo, setFilterTo] = useState(() => toDayInput(new Date()));
   const [filterUserId, setFilterUserId] = useState('');
   const [filterRating, setFilterRating] = useState('');
+
+  const [byAttendant, setByAttendant] = useState<ByAttendantRow[]>([]);
+  const [byAttendantTotal, setByAttendantTotal] = useState(0);
+  const [byAttendantLoading, setByAttendantLoading] = useState(false);
+  const [byAttendantError, setByAttendantError] = useState<string | null>(null);
+
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailName, setDetailName] = useState('');
+  const [detailTickets, setDetailTickets] = useState<Ticket[]>([]);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
 
   const { summary: npsSummary } = useNpsRatings();
   const { profiles } = useProfiles();
@@ -68,6 +93,38 @@ export function Dashboard({ onNavigateToChat }: DashboardProps) {
         .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR')),
     [profiles],
   );
+
+  const loadByAttendant = useCallback(async (from: string, to: string) => {
+    if (from && to && from > to) {
+      setByAttendantError('A data inicial não pode ser maior que a final.');
+      setByAttendant([]);
+      setByAttendantTotal(0);
+      return;
+    }
+    setByAttendantError(null);
+    setByAttendantLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (from) params.set('from', from);
+      if (to) params.set('to', to);
+      const qs = params.toString();
+      const data = await api<{
+        total: number;
+        byAttendant: ByAttendantRow[];
+      }>(`/dashboard/by-attendant${qs ? `?${qs}` : ''}`);
+      setByAttendant(data.byAttendant ?? []);
+      setByAttendantTotal(data.total ?? 0);
+    } catch (err) {
+      console.error('By-attendant load error:', err);
+      setByAttendantError(
+        err instanceof Error ? err.message : 'Falha ao carregar atendimentos por usuário',
+      );
+      setByAttendant([]);
+      setByAttendantTotal(0);
+    } finally {
+      setByAttendantLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -88,6 +145,43 @@ export function Dashboard({ onNavigateToChat }: DashboardProps) {
       }
     })();
   }, []);
+
+  useEffect(() => {
+    void loadByAttendant(filterFrom, filterTo);
+  }, [filterFrom, filterTo, loadByAttendant]);
+
+  const openAttendantDetail = async (row: ByAttendantRow) => {
+    if (row.count <= 0) return;
+    setDetailOpen(true);
+    setDetailName(row.name);
+    setDetailTickets([]);
+    setDetailError(null);
+    setDetailLoading(true);
+    try {
+      const params = new URLSearchParams();
+      params.set('assigneeId', row.assigneeId);
+      if (filterFrom) params.set('from', filterFrom);
+      if (filterTo) params.set('to', filterTo);
+      const data = await api<{ tickets: any[] }>(
+        `/dashboard/by-attendant/tickets?${params.toString()}`,
+      );
+      setDetailTickets((data.tickets || []).map(mapTicket));
+    } catch (err) {
+      console.error('Attendant detail load error:', err);
+      setDetailError(
+        err instanceof Error ? err.message : 'Falha ao carregar atendimentos',
+      );
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+
+  const closeAttendantDetail = () => {
+    setDetailOpen(false);
+    setDetailTickets([]);
+    setDetailError(null);
+    setDetailName('');
+  };
 
   const activeCount =
     metrics?.byStatus?.find((s) => s.status === 'EM_ATENDIMENTO')?.count ??
@@ -110,10 +204,21 @@ export function Dashboard({ onNavigateToChat }: DashboardProps) {
     return { total, dist, avg };
   }, [npsSummary]);
 
-  const applyPreset = (days: number | 'all') => {
+  const maxAttendantCount = useMemo(
+    () => Math.max(0, ...byAttendant.map((row) => row.count)),
+    [byAttendant],
+  );
+
+  const applyPreset = (days: number | 'all' | 'today') => {
     if (days === 'all') {
       setFilterFrom('');
       setFilterTo('');
+      return;
+    }
+    if (days === 'today') {
+      const today = toDayInput(new Date());
+      setFilterFrom(today);
+      setFilterTo(today);
       return;
     }
     setFilterFrom(daysAgo(days - 1));
@@ -121,8 +226,9 @@ export function Dashboard({ onNavigateToChat }: DashboardProps) {
   };
 
   const clearFilters = () => {
-    setFilterFrom('');
-    setFilterTo('');
+    const today = toDayInput(new Date());
+    setFilterFrom(today);
+    setFilterTo(today);
     setFilterUserId('');
     setFilterRating('');
     setReportError(null);
@@ -253,6 +359,17 @@ export function Dashboard({ onNavigateToChat }: DashboardProps) {
     },
   ];
 
+  const periodLabel =
+    filterFrom && filterTo
+      ? filterFrom === filterTo
+        ? `Dia ${formatDayPt(filterFrom)}`
+        : `${formatDayPt(filterFrom)} — ${formatDayPt(filterTo)}`
+      : filterFrom
+        ? `A partir de ${formatDayPt(filterFrom)}`
+        : filterTo
+          ? `Até ${formatDayPt(filterTo)}`
+          : 'Todo o período';
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-96">
@@ -296,11 +413,14 @@ export function Dashboard({ onNavigateToChat }: DashboardProps) {
       <div className="card p-4 space-y-3">
         <div className="flex items-center gap-2">
           <Filter className="w-4 h-4 text-brand-400" />
-          <h3 className="text-sm font-semibold text-white">Filtros do relatório</h3>
-          <span className="text-xs text-ink-300 ml-auto">Aplicados ao PDF</span>
+          <h3 className="text-sm font-semibold text-white">Filtros</h3>
+          <span className="text-xs text-ink-300 ml-auto">Gráfico por atendente + PDF</span>
         </div>
 
         <div className="flex flex-wrap gap-2">
+          <button type="button" className="btn-ghost text-xs px-2.5 py-1" onClick={() => applyPreset('today')}>
+            Hoje
+          </button>
           <button type="button" className="btn-ghost text-xs px-2.5 py-1" onClick={() => applyPreset(7)}>
             7 dias
           </button>
@@ -398,8 +518,81 @@ export function Dashboard({ onNavigateToChat }: DashboardProps) {
         ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="card p-6">
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.15fr)] gap-6 items-start">
+        <div className="card p-5">
+          <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
+            <div className="flex items-center gap-2 min-w-0">
+              <Users className="w-5 h-5 text-brand-400 shrink-0" />
+              <h3 className="text-sm font-semibold text-white truncate">Atendimentos por usuário</h3>
+            </div>
+            <div className="flex items-center gap-2 text-xs text-ink-300">
+              <span className="truncate">{periodLabel}</span>
+              <span className="shrink-0">
+                {byAttendantTotal} atendimento{byAttendantTotal === 1 ? '' : 's'}
+              </span>
+            </div>
+          </div>
+          <p className="text-xs text-ink-300 mb-3 flex items-center gap-1.5">
+            <Search className="w-3.5 h-3.5 text-brand-400 shrink-0" />
+            Clique na lupa para ver os atendimentos
+          </p>
+
+          {byAttendantError && <p className="text-sm text-danger-400 mb-3">{byAttendantError}</p>}
+
+          {byAttendantLoading ? (
+            <div className="flex items-center justify-center py-10">
+              <Loader2 className="w-6 h-6 animate-spin text-brand-500" />
+            </div>
+          ) : byAttendant.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-8 text-ink-300">
+              <Users className="w-10 h-10 mb-2 opacity-30" />
+              <p className="text-sm">Nenhum atendente encontrado</p>
+            </div>
+          ) : (
+            <div className="space-y-2 max-h-64 overflow-y-auto overflow-x-hidden pr-1">
+              {byAttendant.map((row) => (
+                <div key={row.assigneeId} className="flex items-center gap-2 min-w-0">
+                  <button
+                    type="button"
+                    className="inline-flex items-center justify-center w-8 h-8 rounded-lg border border-brand-500/40 bg-brand-500/10 text-brand-400 hover:bg-brand-500/20 hover:text-brand-300 shrink-0 disabled:opacity-35 disabled:cursor-not-allowed disabled:hover:bg-brand-500/10"
+                    title={
+                      row.count > 0
+                        ? `Ver atendimentos de ${row.name}`
+                        : 'Sem atendimentos neste período'
+                    }
+                    disabled={row.count <= 0}
+                    onClick={() => void openAttendantDetail(row)}
+                    aria-label={`Ver atendimentos de ${row.name}`}
+                  >
+                    <Search className="w-4 h-4" />
+                  </button>
+                  <span
+                    className="text-xs text-ink-100 w-20 sm:w-28 truncate shrink-0"
+                    title={row.name}
+                  >
+                    {row.name}
+                  </span>
+                  <div className="flex-1 h-7 bg-ink-800 rounded-md overflow-hidden min-w-0">
+                    <div
+                      className="h-full bg-gradient-to-r from-brand-600 to-brand-400 rounded-md transition-all duration-500 min-w-0"
+                      style={{
+                        width:
+                          maxAttendantCount > 0
+                            ? `${Math.max((row.count / maxAttendantCount) * 100, row.count > 0 ? 4 : 0)}%`
+                            : '0%',
+                      }}
+                    />
+                  </div>
+                  <span className="text-xs text-ink-200 w-7 text-right tabular-nums shrink-0">
+                    {row.count}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="card p-5">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
               <Star className="w-5 h-5 text-warning-400" />
@@ -443,46 +636,101 @@ export function Dashboard({ onNavigateToChat }: DashboardProps) {
             </>
           )}
         </div>
-
-        <div className="card p-6">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <TrendingUp className="w-5 h-5 text-brand-400" />
-              <h3 className="text-sm font-semibold text-white">Tickets Recentes</h3>
-            </div>
-            <button onClick={onNavigateToChat} className="text-xs text-brand-400 hover:text-brand-300">
-              Ver todos →
-            </button>
-          </div>
-          {tickets.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-8 text-ink-300">
-              <TicketIcon className="w-10 h-10 mb-2 opacity-30" />
-              <p className="text-sm">Nenhum ticket ainda</p>
-            </div>
-          ) : (
-            <div className="space-y-2 max-h-64 overflow-y-auto">
-              {tickets.slice(0, 6).map((t) => (
-                <div
-                  key={t.id}
-                  className="flex items-center gap-3 p-2 rounded-lg hover:bg-ink-800 cursor-pointer"
-                  onClick={onNavigateToChat}
-                >
-                  <div className="w-8 h-8 rounded-full bg-ink-700 flex items-center justify-center text-xs font-semibold text-ink-100">
-                    {t.contact?.name?.charAt(0).toUpperCase() ?? '?'}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-white truncate">{t.contact?.name ?? 'Unknown'}</p>
-                    <p className="text-xs text-ink-300 capitalize">{t.status} · {t.department}</p>
-                  </div>
-                  {t.unread_count > 0 && (
-                    <span className="badge bg-danger-500 text-white justify-center min-w-[20px]">{t.unread_count}</span>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
       </div>
+
+      {detailOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          role="dialog"
+          aria-modal="true"
+          onClick={closeAttendantDetail}
+        >
+          <div
+            className="card w-full max-w-lg max-h-[80vh] flex flex-col shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3 p-4 border-b border-ink-700">
+              <div className="min-w-0">
+                <h3 className="text-sm font-semibold text-white truncate">
+                  Atendimentos — {detailName}
+                </h3>
+                <p className="text-xs text-ink-300 mt-0.5">{periodLabel}</p>
+              </div>
+              <button
+                type="button"
+                className="btn-ghost p-1 shrink-0"
+                onClick={closeAttendantDetail}
+                title="Fechar"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4">
+              {detailLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="w-6 h-6 animate-spin text-brand-500" />
+                </div>
+              ) : detailError ? (
+                <p className="text-sm text-danger-400">{detailError}</p>
+              ) : detailTickets.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-10 text-ink-300">
+                  <TicketIcon className="w-10 h-10 mb-2 opacity-30" />
+                  <p className="text-sm">Nenhum atendimento neste período</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {detailTickets.map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      className="w-full flex items-center gap-3 p-3 rounded-lg bg-ink-800/60 hover:bg-ink-800 text-left transition-colors"
+                      onClick={() => {
+                        closeAttendantDetail();
+                        if (onOpenTicket) onOpenTicket(t.id);
+                        else onNavigateToChat();
+                      }}
+                      title="Abrir no chat"
+                    >
+                      <div className="w-9 h-9 rounded-full bg-ink-700 flex items-center justify-center text-xs font-semibold text-ink-100 shrink-0">
+                        {t.contact?.name?.charAt(0).toUpperCase() ?? '?'}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-white truncate">
+                          {t.contact?.name ?? 'Sem nome'}
+                        </p>
+                        <p className="text-xs text-ink-300 truncate">
+                          {t.subject?.trim() || t.contact?.phone || t.id.slice(0, 8)}
+                          {t.department ? ` · ${t.department}` : ''}
+                        </p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className="text-[11px] text-ink-300">
+                          {t.finished_at
+                            ? new Date(t.finished_at).toLocaleString('pt-BR', {
+                                day: '2-digit',
+                                month: '2-digit',
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })
+                            : '—'}
+                        </p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {!detailLoading && detailTickets.length > 0 && (
+              <div className="px-4 py-3 border-t border-ink-700 text-xs text-ink-300">
+                {detailTickets.length} atendimento
+                {detailTickets.length === 1 ? '' : 's'} · clique para abrir no chat
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

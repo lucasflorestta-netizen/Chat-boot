@@ -419,7 +419,10 @@ function AuthenticatedApp() {
         ) : (
           <>
             {activeTab === 'dashboard' && profile.role === 'admin' && (
-              <Dashboard onNavigateToChat={() => setActiveTab('chat')} />
+              <Dashboard
+                onNavigateToChat={() => setActiveTab('chat')}
+                onOpenTicket={handleStartConversation}
+              />
             )}
             {activeTab === 'chat' && !lockToWhatsapp && (
               <ChatView
