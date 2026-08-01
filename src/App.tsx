@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { AuthProvider } from './context/AuthContext';
 import { useAuth } from './context/useAuth';
 import { WhatsappConnectionProvider } from './context/WhatsappConnectionContext';
@@ -11,7 +11,6 @@ import { ContactsView } from './components/views/ContactsView';
 import { UsersView } from './components/views/UsersView';
 import { WhatsappView } from './components/views/WhatsappView';
 import { AutoMessagesView } from './components/views/AutoMessagesView';
-import { SettingsView } from './components/views/SettingsView';
 import { TagsView } from './components/views/TagsView';
 import { CannedView } from './components/views/CannedView';
 import { InternalChatView } from './components/views/InternalChatView';
@@ -24,7 +23,7 @@ import { mapMediaType, mapTicket } from './lib/mappers';
 import { TransferAcceptModal } from './components/chat/TransferAcceptModal';
 import { ContactAvatar } from './components/ContactAvatar';
 import type { Ticket } from './types';
-import { Loader2, WifiOff } from 'lucide-react';
+import { AlertCircle, Loader2, WifiOff } from 'lucide-react';
 
 const TOAST_BODY_MAX = 120;
 
@@ -64,6 +63,7 @@ function previewInternalMessage(message: {
   }
   if (message.type === 'IMAGE') return 'Enviou uma imagem';
   if (message.type === 'AUDIO') return 'Enviou um áudio';
+  if (message.type === 'FILE') return 'Enviou um arquivo';
   return 'Nova mensagem interna';
 }
 
@@ -74,7 +74,6 @@ const AGENT_BLOCKED_TABS: TabId[] = [
   'canned',
   'users',
   'auto-messages',
-  'settings',
 ];
 
 function AppContent() {
@@ -96,6 +95,26 @@ function AppContent() {
     <WhatsappConnectionProvider>
       <AuthenticatedApp />
     </WhatsappConnectionProvider>
+  );
+}
+
+function LoginSessionBanner() {
+  const { loginNotice, clearLoginNotice } = useAuth();
+  if (!loginNotice) return null;
+  return (
+    <div className="fixed top-3 left-1/2 z-[100] w-[min(36rem,calc(100%-1.5rem))] -translate-x-1/2">
+      <div className="flex items-start gap-3 rounded-xl border border-warning-500/40 bg-ink-900/95 px-4 py-3 text-sm text-warning-200 shadow-xl backdrop-blur">
+        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-warning-400" />
+        <p className="flex-1">{loginNotice}</p>
+        <button
+          type="button"
+          onClick={clearLoginNotice}
+          className="rounded-md px-2 py-0.5 text-xs text-ink-300 hover:bg-ink-800 hover:text-white"
+        >
+          Fechar
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -317,24 +336,6 @@ function AuthenticatedApp() {
     }
   }, [lockToWhatsapp, activeTab]);
 
-  const unreadCount = useMemo(() => {
-    if (!profile) return 0;
-    const visible = profile.role === 'admin'
-      ? tickets
-      : tickets.filter(
-          (t) =>
-            t.status === 'triage' ||
-            (profile.sectorIds?.length
-              ? profile.sectorIds.includes(t.sectorId ?? '')
-              : profile.sectorId != null && t.sectorId === profile.sectorId) ||
-            t.assigned_to === profile.id ||
-            t.pending_transfer_to === profile.id,
-        );
-    return visible
-      .filter((t) => t.status !== 'finished')
-      .reduce((sum, t) => sum + (t.unread_count || 0), 0);
-  }, [tickets, profile]);
-
   if (!profile) return null;
 
   const guardedTab = (tab: TabId): TabId => {
@@ -383,6 +384,7 @@ function AuthenticatedApp() {
 
   return (
     <div className="flex h-screen overflow-hidden bg-ink-950">
+      <LoginSessionBanner />
       {pendingTransfer &&
         pendingTransfer.pending_transfer_to === profile.id &&
         !isWhatsappDisconnected && (
@@ -396,7 +398,6 @@ function AuthenticatedApp() {
       <Sidebar
         active={activeTab}
         onNavigate={handleNavigate}
-        unreadCount={unreadCount}
         internalUnreadCount={internalUnread}
         soundEnabled={soundEnabled}
         onToggleSound={() => setSoundEnabled(!soundEnabled)}
@@ -424,12 +425,18 @@ function AuthenticatedApp() {
                 onOpenTicket={handleStartConversation}
               />
             )}
-            {activeTab === 'chat' && !lockToWhatsapp && (
-              <ChatView
-                preselectedTicketId={preselectedTicket}
-                onConsumePreselect={() => setPreselectedTicket(null)}
-                onSelectedTicketChange={handleSelectedTicketChange}
-              />
+            {!lockToWhatsapp && (
+              <div
+                className={
+                  activeTab === 'chat' ? 'flex-1 min-h-0 h-full flex flex-col' : 'hidden'
+                }
+              >
+                <ChatView
+                  preselectedTicketId={preselectedTicket}
+                  onConsumePreselect={() => setPreselectedTicket(null)}
+                  onSelectedTicketChange={handleSelectedTicketChange}
+                />
+              </div>
             )}
             {activeTab === 'contacts' && !lockToWhatsapp && (
               <div className="flex-1 min-h-0">
@@ -437,14 +444,13 @@ function AuthenticatedApp() {
               </div>
             )}
             {activeTab === 'users' && profile.role === 'admin' && !lockToWhatsapp && (
-              <UsersView />
+              <div className="flex-1 min-h-0 overflow-y-auto">
+                <UsersView />
+              </div>
             )}
             {activeTab === 'whatsapp' && profile.role === 'admin' && <WhatsappView />}
             {activeTab === 'auto-messages' && profile.role === 'admin' && !lockToWhatsapp && (
               <AutoMessagesView />
-            )}
-            {activeTab === 'settings' && profile.role === 'admin' && !lockToWhatsapp && (
-              <SettingsView />
             )}
             {activeTab === 'tags' && profile.role === 'admin' && !lockToWhatsapp && <TagsView />}
             {activeTab === 'canned' && profile.role === 'admin' && !lockToWhatsapp && (

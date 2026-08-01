@@ -103,6 +103,8 @@ export interface TicketLastMessage {
 
 export interface Ticket {
   id: string;
+  /** Número do protocolo gerado (ex.: CC20260728-0001). */
+  protocolo?: string | null;
   contact_id: string;
   status: TicketStatus;
   department: Department;
@@ -207,6 +209,12 @@ export interface AutoMessageSettings {
   business_hours_end: string;
   /** ISO weekdays 1=Mon … 7=Sun. */
   business_days: number[];
+  saturday_hours_enabled: boolean;
+  saturday_hours_start: string;
+  saturday_hours_end: string;
+  sunday_hours_enabled: boolean;
+  sunday_hours_start: string;
+  sunday_hours_end: string;
   /** Offline automático (almoço com lead / workEnd exato); só com agente logado. */
   operator_lunch_auto_status: boolean;
   inactivity_enabled: boolean;

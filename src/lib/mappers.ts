@@ -237,6 +237,7 @@ export function mapTicket(raw: any): Ticket {
 
   return {
     id: raw.id,
+    protocolo: raw.protocolo ?? raw.protocol ?? null,
     contact_id: raw.contactId ?? raw.contact_id,
     status: mapTicketStatus(raw.status),
     department: mapSectorToDepartment(raw.sector?.name),
@@ -331,6 +332,16 @@ export function mapCanned(raw: any): CannedResponse {
 }
 
 export function mapAutoSettings(raw: any): AutoMessageSettings {
+  const businessDays = Array.isArray(raw.businessDays ?? raw.business_days)
+    ? [...(raw.businessDays ?? raw.business_days)].map(Number).filter((d) => d >= 1 && d <= 7)
+    : [1, 2, 3, 4, 5];
+  const weekdayStart =
+    raw.businessHoursStart ?? raw.business_hours_start ?? '08:00';
+  const weekdayEnd = raw.businessHoursEnd ?? raw.business_hours_end ?? '18:00';
+  const saturdayEnabledRaw =
+    raw.saturdayHoursEnabled ?? raw.saturday_hours_enabled;
+  const sundayEnabledRaw = raw.sundayHoursEnabled ?? raw.sunday_hours_enabled;
+
   return {
     id: raw.id,
     greeting_message: raw.greetingMessage ?? raw.greeting_message ?? '',
@@ -349,13 +360,20 @@ export function mapAutoSettings(raw: any): AutoMessageSettings {
       'Todos os nossos atendentes estão ocupados no momento. Aguarde na fila que em breve você será atendido.',
     business_hours_enabled:
       raw.businessHoursEnabled ?? raw.business_hours_enabled ?? false,
-    business_hours_start:
-      raw.businessHoursStart ?? raw.business_hours_start ?? '08:00',
-    business_hours_end:
-      raw.businessHoursEnd ?? raw.business_hours_end ?? '18:00',
-    business_days: Array.isArray(raw.businessDays ?? raw.business_days)
-      ? [...(raw.businessDays ?? raw.business_days)].map(Number).filter((d) => d >= 1 && d <= 7)
-      : [1, 2, 3, 4, 5],
+    business_hours_start: weekdayStart,
+    business_hours_end: weekdayEnd,
+    business_days: businessDays,
+    saturday_hours_enabled:
+      saturdayEnabledRaw ?? businessDays.includes(6),
+    saturday_hours_start:
+      raw.saturdayHoursStart ?? raw.saturday_hours_start ?? weekdayStart,
+    saturday_hours_end:
+      raw.saturdayHoursEnd ?? raw.saturday_hours_end ?? '12:00',
+    sunday_hours_enabled: sundayEnabledRaw ?? businessDays.includes(7),
+    sunday_hours_start:
+      raw.sundayHoursStart ?? raw.sunday_hours_start ?? weekdayStart,
+    sunday_hours_end:
+      raw.sundayHoursEnd ?? raw.sunday_hours_end ?? '12:00',
     operator_lunch_auto_status:
       raw.operatorLunchAutoStatus ?? raw.operator_lunch_auto_status ?? true,
     inactivity_enabled:

@@ -26,7 +26,11 @@ interface MessageComposerProps {
   canned: CannedResponse[];
   disabled?: boolean;
   uploading?: boolean;
+  /** 0–100 enquanto envia (opcional; comunicador interno). */
+  uploadProgress?: number | null;
+  uploadStatusText?: string | null;
   placeholder?: string;
+  onTyping?: (typing: boolean) => void;
 }
 
 export function MessageComposer({
@@ -42,7 +46,10 @@ export function MessageComposer({
   canned,
   disabled,
   uploading = false,
+  uploadProgress = null,
+  uploadStatusText = null,
   placeholder = 'Digite uma mensagem... (use / para respostas rápidas)',
+  onTyping,
 }: MessageComposerProps) {
   const [input, setInput] = useState('');
   const [showEmoji, setShowEmoji] = useState(false);
@@ -90,6 +97,7 @@ export function MessageComposer({
     const next = autoCapitalize(el.value);
     setInput(next);
     restoreCursor(cursor);
+    onTyping?.(next.trim().length > 0);
 
     if (showCanned || showEmoji) {
       setSpellHint(null);
@@ -121,6 +129,7 @@ export function MessageComposer({
     setShowCanned(false);
     setSpellHint(null);
     setError(null);
+    onTyping?.(false);
     try {
       await onSendText(body);
     } catch (err) {
@@ -135,6 +144,22 @@ export function MessageComposer({
     if (!list?.length) return;
     setError(null);
     onPickFiles(Array.from(list));
+  };
+
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    if (disabled || uploading) return;
+    const items = e.clipboardData?.items;
+    if (!items?.length) return;
+    const files: File[] = [];
+    for (const item of Array.from(items)) {
+      if (item.kind !== 'file') continue;
+      const file = item.getAsFile();
+      if (file) files.push(file);
+    }
+    if (!files.length) return;
+    e.preventDefault();
+    setError(null);
+    onPickFiles(files);
   };
 
   const handleAudio = async (blob: Blob, fileName: string) => {
@@ -170,6 +195,42 @@ export function MessageComposer({
     } finally {
       setStickerBusy(false);
     }
+  };
+
+  const collectDroppedFiles = (e: React.DragEvent): File[] => {
+    const collected: File[] = [];
+    if (e.dataTransfer.items?.length) {
+      for (const item of Array.from(e.dataTransfer.items)) {
+        if (item.kind !== 'file') continue;
+        const entry = (
+          item as DataTransferItem & {
+            webkitGetAsEntry?: () => { isDirectory?: boolean } | null;
+          }
+        ).webkitGetAsEntry?.();
+        if (entry?.isDirectory) continue;
+        const f = item.getAsFile();
+        if (f) collected.push(f);
+      }
+    }
+    if (!collected.length && e.dataTransfer.files?.length) {
+      collected.push(...Array.from(e.dataTransfer.files));
+    }
+    if (!collected.length) {
+      const plain = e.dataTransfer.getData('text/plain');
+      if (plain?.trim()) {
+        collected.push(new File([plain], 'mensagem.txt', { type: 'text/plain' }));
+      }
+    }
+    return collected;
+  };
+
+  const handleComposerDrop = (e: React.DragEvent) => {
+    if (disabled) return;
+    const files = collectDroppedFiles(e);
+    if (!files.length) return;
+    e.preventDefault();
+    e.stopPropagation();
+    onPickFiles(files);
   };
 
   const canType = !voiceBusy;
@@ -251,10 +312,30 @@ export function MessageComposer({
 
       {error && <p className="text-xs text-danger-400 mb-1">{error}</p>}
       {(uploading || stickerBusy) && (
-        <p className="text-xs text-ink-300 mb-1 flex items-center gap-1.5">
-          <Loader2 className="w-3 h-3 animate-spin" />
-          Enviando…
-        </p>
+        <div className="mb-1.5 space-y-1">
+          <p className="text-xs text-ink-300 flex items-center gap-1.5">
+            <Loader2 className="w-3 h-3 animate-spin flex-shrink-0" />
+            <span className="truncate">
+              {uploadStatusText ||
+                (typeof uploadProgress === 'number'
+                  ? `Enviando ${uploadProgress}%`
+                  : 'Enviando…')}
+            </span>
+            {typeof uploadProgress === 'number' && (
+              <span className="tabular-nums text-ink-200 ml-auto">
+                {uploadProgress}%
+              </span>
+            )}
+          </p>
+          {typeof uploadProgress === 'number' && (
+            <div className="h-1 rounded-full bg-ink-800 overflow-hidden">
+              <div
+                className="h-full rounded-full bg-brand-500 transition-[width] duration-150 ease-out"
+                style={{ width: `${Math.max(0, Math.min(100, uploadProgress))}%` }}
+              />
+            </div>
+          )}
+        </div>
       )}
 
       <div className="flex items-end gap-1.5">
@@ -307,6 +388,13 @@ export function MessageComposer({
               ref={textareaRef}
               value={input}
               onChange={handleInputChange}
+              onPaste={handlePaste}
+              onDragOver={(e) => {
+                if (disabled) return;
+                e.preventDefault();
+                e.stopPropagation();
+              }}
+              onDrop={handleComposerDrop}
               onBlur={() => {
                 const el = textareaRef.current;
                 if (!el || showCanned || showEmoji) return;

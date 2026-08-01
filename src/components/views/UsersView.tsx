@@ -5,7 +5,6 @@ import { api } from '../../lib/api';
 import {
   agentStatusBadgeClass,
   agentStatusLabel,
-  LUNCH_AUTO_OFFLINE_LEAD_MINUTES,
 } from '../../lib/agentStatus';
 import { departmentLabel } from '../../lib/mappers';
 import type { ApiUserRole, Profile } from '../../types';
@@ -58,7 +57,7 @@ export function UsersView() {
   }
 
   return (
-    <div className="p-6 space-y-4">
+    <div className="p-6 h-auto space-y-4">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-bold text-white">Gestão de Usuários</h2>
@@ -70,12 +69,6 @@ export function UsersView() {
         </button>
       </div>
 
-      <SectorsCard
-        sectors={sectors}
-        loading={sectorsLoading}
-        onChanged={refetchSectors}
-      />
-
       {showAdd && (
         <CreateUserForm
           sectors={sectors}
@@ -84,85 +77,95 @@ export function UsersView() {
         />
       )}
 
-      <div className="flex flex-wrap gap-3">
-        {profiles.map((p) => (
-          <div key={p.id} className="card p-3 w-[280px] hover:border-ink-600 transition-colors">
-            <div className="flex items-start gap-2.5">
-              <ContactAvatar
-                name={p.name}
-                profilePicUrl={p.avatar_url}
-                size="sm"
-                rounded="lg"
-              />
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-1.5">
-                  <p className="text-sm font-semibold text-white truncate">{p.name}</p>
-                  {(p.apiRole === 'ADMIN' || p.apiRole === 'SUPERVISOR') && (
-                    <Shield className="w-3.5 h-3.5 text-warning-400 flex-shrink-0" />
-                  )}
-                  {p.id === currentUser?.id && (
-                    <span className="badge bg-brand-500/20 text-brand-300 text-[10px]">Você</span>
-                  )}
-                </div>
-                <p className="text-[11px] text-ink-300 truncate">
-                  @{p.username}{p.email ? ` · ${p.email}` : ''}
-                </p>
-                <div className="flex items-center gap-1 mt-1 flex-wrap">
-                  <span className={`badge text-[10px] ${
-                    p.apiRole === 'ADMIN'
-                      ? 'bg-warning-500/20 text-warning-400'
-                      : p.apiRole === 'SUPERVISOR'
-                        ? 'bg-purple-500/20 text-purple-300'
-                        : 'bg-brand-500/20 text-brand-300'
-                  }`}>
-                    {roleLabel(p.apiRole)}
-                  </span>
-                  {p.sectors?.length ? (
-                    p.sectors.map((s) => (
-                      <span key={s.id} className="badge bg-ink-700 text-ink-200 text-[10px]">
-                        {s.name}
-                      </span>
-                    ))
-                  ) : (
-                    <span className="badge bg-ink-700 text-ink-200 text-[10px]">
-                      {departmentLabel(p.department)}
+      <div className="flex gap-6 items-start">
+        <div className="w-80 shrink-0 h-fit">
+          <SectorsCard
+            sectors={sectors}
+            loading={sectorsLoading}
+            onChanged={refetchSectors}
+          />
+        </div>
+
+        <div className="flex-1 min-w-0 grid grid-cols-3 gap-3">
+          {profiles.map((p) => (
+            <div key={p.id} className="card p-3 hover:border-ink-600 transition-colors">
+              <div className="flex items-start gap-2.5">
+                <ContactAvatar
+                  name={p.name}
+                  profilePicUrl={p.avatar_url}
+                  size="sm"
+                  rounded="lg"
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <p className="text-sm font-semibold text-white truncate">{p.name}</p>
+                    {(p.apiRole === 'ADMIN' || p.apiRole === 'SUPERVISOR') && (
+                      <Shield className="w-3.5 h-3.5 text-warning-400 flex-shrink-0" />
+                    )}
+                    {p.id === currentUser?.id && (
+                      <span className="badge bg-brand-500/20 text-brand-300 text-[10px]">Você</span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-ink-300 truncate">
+                    @{p.username}{p.email ? ` · ${p.email}` : ''}
+                  </p>
+                  <div className="flex items-center gap-1 mt-1 flex-wrap">
+                    <span className={`badge text-[10px] ${
+                      p.apiRole === 'ADMIN'
+                        ? 'bg-warning-500/20 text-warning-400'
+                        : p.apiRole === 'SUPERVISOR'
+                          ? 'bg-purple-500/20 text-purple-300'
+                          : 'bg-brand-500/20 text-brand-300'
+                    }`}>
+                      {roleLabel(p.apiRole)}
                     </span>
-                  )}
-                  <span className={`badge text-[10px] ${agentStatusBadgeClass(p.status)}`}>
-                    {agentStatusLabel(p.status)}
-                  </span>
+                    {p.sectors?.length ? (
+                      p.sectors.map((s) => (
+                        <span key={s.id} className="badge bg-ink-700 text-ink-200 text-[10px]">
+                          {s.name}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="badge bg-ink-700 text-ink-200 text-[10px]">
+                        {departmentLabel(p.department)}
+                      </span>
+                    )}
+                    <span className={`badge text-[10px] ${agentStatusBadgeClass(p.status)}`}>
+                      {agentStatusLabel(p.status)}
+                    </span>
+                  </div>
                 </div>
-              </div>
-              <div className="flex items-center gap-0.5 shrink-0 -mt-0.5 -mr-1">
-                <button
-                  onClick={() => setEditing(p)}
-                  className="btn-ghost p-1.5 text-ink-300 hover:text-white"
-                  title="Editar"
-                >
-                  <Pencil className="w-3.5 h-3.5" />
-                </button>
-                {p.id !== currentUser?.id && (
+                <div className="flex items-center gap-0.5 shrink-0 -mt-0.5 -mr-1">
                   <button
-                    onClick={async () => {
-                      if (confirm(`Remover ${p.name}?`)) {
-                        try {
-                          await api(`/users/${p.id}`, { method: 'DELETE' });
-                          refetch();
-                        } catch (err) {
-                          alert(err instanceof Error ? err.message : 'Falha ao remover');
-                        }
-                      }
-                    }}
-                    className="btn-ghost p-1.5 text-danger-400"
-                    title="Remover"
+                    onClick={() => setEditing(p)}
+                    className="btn-ghost p-1.5 text-ink-300 hover:text-white"
+                    title="Editar"
                   >
-                    <Trash2 className="w-3.5 h-3.5" />
+                    <Pencil className="w-3.5 h-3.5" />
                   </button>
-                )}
+                  {p.id !== currentUser?.id && (
+                    <button
+                      onClick={async () => {
+                        if (confirm(`Remover ${p.name}?`)) {
+                          try {
+                            await api(`/users/${p.id}`, { method: 'DELETE' });
+                            refetch();
+                          } catch (err) {
+                            alert(err instanceof Error ? err.message : 'Falha ao remover');
+                          }
+                        }
+                      }}
+                      className="btn-ghost p-1.5 text-danger-400"
+                      title="Remover"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
-          </div>
-        ))}
+          ))}
+        </div>
       </div>
 
       {editing && (
@@ -413,10 +416,12 @@ function SectorMultiSelect({
   sectors,
   selectedIds,
   onChange,
+  layout = 'stacked',
 }: {
   sectors: Array<{ id: string; name: string }>;
   selectedIds: string[];
   onChange: (ids: string[]) => void;
+  layout?: 'stacked' | 'inline';
 }) {
   const toggle = (id: string) => {
     if (selectedIds.includes(id)) {
@@ -425,6 +430,31 @@ function SectorMultiSelect({
       onChange([...selectedIds, id]);
     }
   };
+
+  if (layout === 'inline') {
+    return (
+      <div>
+        <label className="label !mb-1">Setores</label>
+        {sectors.length === 0 ? (
+          <p className="text-xs text-ink-400">Nenhum setor cadastrado</p>
+        ) : (
+          <div className="flex flex-wrap gap-4">
+            {sectors.map((s) => (
+              <label key={s.id} className="flex items-center gap-1.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={selectedIds.includes(s.id)}
+                  onChange={() => toggle(s.id)}
+                  className="rounded border-ink-500 text-brand-500 focus:ring-brand-500"
+                />
+                <span className="text-sm text-ink-100">{s.name}</span>
+              </label>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-1.5">
@@ -678,9 +708,12 @@ function EditUserModal({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 animate-fade-in" onClick={onClose}>
-      <div className="card p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-5">
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 animate-fade-in p-3" onClick={onClose}>
+      <div
+        className="card p-4 w-[800px] max-w-[calc(100vw-1.5rem)] max-h-[90vh] overflow-hidden flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-4 shrink-0">
           <div className="flex items-center gap-3">
             <AvatarUploadButton
               profileId={user.id}
@@ -702,94 +735,112 @@ function EditUserModal({
           <button onClick={onClose} className="btn-ghost p-1"><X className="w-4 h-4" /></button>
         </div>
 
-        <div className="space-y-3 mb-5">
-          <p className="text-xs font-semibold text-ink-200 uppercase tracking-wide">Dados Pessoais</p>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="label">Nome</label>
-              <input value={name} onChange={(e) => setName(e.target.value)} className="input" />
+        <div className="grid grid-cols-2 gap-4 min-h-0">
+          {/* Dados Pessoais */}
+          <div className="space-y-2.5 min-w-0">
+            <p className="text-xs font-semibold text-ink-200 uppercase tracking-wide">Dados Pessoais</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="label !mb-1">Nome</label>
+                <input value={name} onChange={(e) => setName(e.target.value)} className="input h-9 !py-1.5 text-sm" />
+              </div>
+              <div>
+                <label className="label !mb-1">Usuário (login)</label>
+                <input value={username} onChange={(e) => setUsername(e.target.value)} className="input h-9 !py-1.5 text-sm" />
+              </div>
+              <div>
+                <label className="label !mb-1">E-mail</label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="input h-9 !py-1.5 text-sm"
+                  placeholder="Opcional"
+                />
+              </div>
+              <div>
+                <label className="label !mb-1">Ramal</label>
+                <input
+                  value={ramal}
+                  onChange={(e) => setRamal(e.target.value)}
+                  className="input h-9 !py-1.5 text-sm"
+                  placeholder="Ex: 2041"
+                  maxLength={32}
+                />
+              </div>
+              <div className="col-span-2">
+                <label className="label !mb-1">Nova Senha</label>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="input h-9 !py-1.5 text-sm"
+                  placeholder="Deixe em branco para manter a senha atual"
+                  autoComplete="new-password"
+                />
+              </div>
             </div>
-            <div>
-              <label className="label">Usuário (login)</label>
-              <input value={username} onChange={(e) => setUsername(e.target.value)} className="input" />
+          </div>
+
+          {/* Permissões */}
+          <div className="space-y-2.5 min-w-0">
+            <p className="text-xs font-semibold text-ink-200 uppercase tracking-wide">Permissões</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="label !mb-1">Nível de Acesso</label>
+                <select value={role} onChange={(e) => setRole(toApiRole(e.target.value))} className="input h-9 !py-1.5 text-sm">
+                  <option value="OPERATOR">Agente</option>
+                  <option value="SUPERVISOR">Supervisor</option>
+                  <option value="ADMIN">Administrador</option>
+                </select>
+              </div>
+              <div>
+                <label className="label !mb-1">Máx. Conversas Simultâneas</label>
+                <input
+                  type="number"
+                  value={maxChats}
+                  onChange={(e) => setMaxChats(Math.min(50, Math.max(1, parseInt(e.target.value, 10) || 1)))}
+                  className="input h-9 !py-1.5 text-sm"
+                  min={1}
+                  max={50}
+                />
+              </div>
             </div>
-            <div>
-              <label className="label">E-mail</label>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="input"
-                placeholder="Opcional"
-              />
-            </div>
-            <div>
-              <label className="label">Ramal</label>
-              <input
-                value={ramal}
-                onChange={(e) => setRamal(e.target.value)}
-                className="input"
-                placeholder="Ex: 2041"
-                maxLength={32}
-              />
-            </div>
-            <div className="col-span-2">
-              <label className="label">Nova Senha</label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="input"
-                placeholder="Deixe em branco para manter a senha atual"
-                autoComplete="new-password"
-              />
-              <p className="mt-1 text-[11px] text-ink-300">
-                Preencha apenas se quiser alterar a senha. Mínimo de 6 caracteres.
-              </p>
+            <SectorMultiSelect
+              sectors={sectors}
+              selectedIds={sectorIds}
+              onChange={setSectorIds}
+              layout="inline"
+            />
+            <div className="flex items-center justify-between gap-3">
+              <label className="label !mb-0">Status</label>
+              <div className="flex items-center gap-2">
+                <span className={`text-xs ${isActive ? 'text-success-400' : 'text-ink-400'}`}>
+                  {isActive ? 'Ativo' : 'Inativo'}
+                </span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={isActive}
+                  aria-label="Status do usuário"
+                  onClick={() => setIsActive((v) => !v)}
+                  className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${
+                    isActive ? 'bg-success-500' : 'bg-ink-600'
+                  }`}
+                >
+                  <span
+                    className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white transition-transform ${
+                      isActive ? 'translate-x-4' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
+              </div>
             </div>
           </div>
         </div>
 
-        <div className="space-y-3 mb-5">
-          <p className="text-xs font-semibold text-ink-200 uppercase tracking-wide">Permissões</p>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="label">Nível de Acesso</label>
-              <select value={role} onChange={(e) => setRole(toApiRole(e.target.value))} className="input">
-                <option value="OPERATOR">Agente</option>
-                <option value="SUPERVISOR">Supervisor</option>
-                <option value="ADMIN">Administrador</option>
-              </select>
-            </div>
-            <div>
-              <label className="label">Máx. Conversas Simultâneas</label>
-              <input
-                type="number"
-                value={maxChats}
-                onChange={(e) => setMaxChats(Math.min(50, Math.max(1, parseInt(e.target.value, 10) || 1)))}
-                className="input"
-                min={1}
-                max={50}
-              />
-            </div>
-            <div className="col-span-2">
-              <SectorMultiSelect
-                sectors={sectors}
-                selectedIds={sectorIds}
-                onChange={setSectorIds}
-              />
-            </div>
-            <div>
-              <label className="label">Status</label>
-              <select value={isActive ? 'active' : 'inactive'} onChange={(e) => setIsActive(e.target.value === 'active')} className="input">
-                <option value="active">Ativo</option>
-                <option value="inactive">Inativo</option>
-              </select>
-            </div>
-          </div>
-        </div>
-
-        <div className="space-y-3 mb-5">
+        {/* Horário de Atendimento */}
+        <div className="mt-4 space-y-2.5">
           <div className="flex items-center gap-2">
             <Clock className="w-4 h-4 text-brand-400" />
             <p className="text-xs font-semibold text-ink-200 uppercase tracking-wide">Horário de Atendimento</p>
@@ -797,27 +848,24 @@ function EditUserModal({
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="label">Início do Expediente</label>
-              <select value={workStart} onChange={(e) => setWorkStart(e.target.value)} className="input">
+              <label className="label !mb-1">Início do Expediente</label>
+              <select value={workStart} onChange={(e) => setWorkStart(e.target.value)} className="input h-9 !py-1.5 text-sm">
                 {TIME_OPTIONS.map((t) => (
                   <option key={t} value={t}>{t}</option>
                 ))}
               </select>
             </div>
             <div>
-              <label className="label">Fim do Expediente</label>
-              <select value={workEnd} onChange={(e) => setWorkEnd(e.target.value)} className="input">
+              <label className="label !mb-1">Fim do Expediente</label>
+              <select value={workEnd} onChange={(e) => setWorkEnd(e.target.value)} className="input h-9 !py-1.5 text-sm">
                 {TIME_OPTIONS.map((t) => (
                   <option key={t} value={t}>{t}</option>
                 ))}
               </select>
             </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="label">Início do Almoço</label>
-              <select value={lunchStart} onChange={(e) => handleLunchStartChange(e.target.value)} className="input">
+              <label className="label !mb-1">Início do Almoço</label>
+              <select value={lunchStart} onChange={(e) => handleLunchStartChange(e.target.value)} className="input h-9 !py-1.5 text-sm">
                 <option value="">Sem almoço</option>
                 {TIME_OPTIONS.map((t) => (
                   <option key={t} value={t}>{t}</option>
@@ -825,8 +873,8 @@ function EditUserModal({
               </select>
             </div>
             <div>
-              <label className="label">Fim do Almoço</label>
-              <select value={lunchEnd} onChange={(e) => setLunchEnd(e.target.value)} className="input" disabled={!lunchStart}>
+              <label className="label !mb-1">Fim do Almoço</label>
+              <select value={lunchEnd} onChange={(e) => setLunchEnd(e.target.value)} className="input h-9 !py-1.5 text-sm" disabled={!lunchStart}>
                 <option value="">Sem almoço</option>
                 {TIME_OPTIONS.map((t) => (
                   <option key={t} value={t}>{t}</option>
@@ -834,30 +882,26 @@ function EditUserModal({
               </select>
             </div>
           </div>
-
-          <p className="text-[11px] text-ink-400">
-            Com o agente logado: no horário exato do fim do expediente fica offline; com almoço, {LUNCH_AUTO_OFFLINE_LEAD_MINUTES} min antes do início até o fim. Volta a Disponível ao sair da janela se ainda estiver logado. Atendimentos já atribuídos permanecem com ele.
-          </p>
 
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
               onClick={() => { setWorkStart('08:00'); setWorkEnd('17:00'); setLunchStart('12:00'); setLunchEnd('13:00'); }}
-              className="text-xs px-2.5 py-1 rounded-md bg-ink-700 text-ink-200 hover:bg-ink-600 hover:text-white transition-colors"
+              className="text-xs py-1 px-2 rounded-md bg-ink-700 text-ink-200 hover:bg-ink-600 hover:text-white transition-colors"
             >
-              08h-17h (Almoço 12h-13h)
+              08h-17h
             </button>
             <button
               type="button"
               onClick={() => { setWorkStart('09:00'); setWorkEnd('18:00'); setLunchStart('12:00'); setLunchEnd('13:00'); }}
-              className="text-xs px-2.5 py-1 rounded-md bg-ink-700 text-ink-200 hover:bg-ink-600 hover:text-white transition-colors"
+              className="text-xs py-1 px-2 rounded-md bg-ink-700 text-ink-200 hover:bg-ink-600 hover:text-white transition-colors"
             >
-              09h-18h (Almoço 12h-13h)
+              09h-18h
             </button>
             <button
               type="button"
               onClick={() => { setWorkStart('14:00'); setWorkEnd('23:00'); setLunchStart(''); setLunchEnd(''); }}
-              className="text-xs px-2.5 py-1 rounded-md bg-ink-700 text-ink-200 hover:bg-ink-600 hover:text-white transition-colors"
+              className="text-xs py-1 px-2 rounded-md bg-ink-700 text-ink-200 hover:bg-ink-600 hover:text-white transition-colors"
             >
               Tarde 14h-23h
             </button>
@@ -865,12 +909,12 @@ function EditUserModal({
         </div>
 
         {error && (
-          <div className="mb-3 p-2.5 bg-danger-500/10 border border-danger-500/30 rounded-lg text-xs text-danger-400">
+          <div className="mt-3 p-2 bg-danger-500/10 border border-danger-500/30 rounded-lg text-xs text-danger-400 shrink-0">
             {error}
           </div>
         )}
 
-        <div className="flex gap-2">
+        <div className="flex gap-2 mt-4 shrink-0">
           <button onClick={handleSave} disabled={saving} className="btn-primary flex-1">
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
             Salvar Alterações

@@ -1,84 +1,87 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from 'react';
 import {
   Image as ImageIcon,
   Loader2,
   MessageCircleMore,
-  Paperclip,
   Search,
-  Send,
+  Upload,
   Users,
 } from 'lucide-react';
 import { useAuth } from '../../context/useAuth';
-import { mediaUrl, uploadFile } from '../../lib/api';
+import { mediaUrl } from '../../lib/api';
+import {
+  compressInternalChatImage,
+  uploadInternalChatFile,
+} from '../../lib/internalChatUpload';
+import {
+  loadRecentStickers,
+  mergeRecentStickers,
+  pushRecentSticker,
+  type RecentSticker,
+} from '../../lib/recentStickers';
+import {
+  readLocalWallpaper,
+  resolveWallpaper,
+  writeLocalWallpaper,
+} from '../../lib/chatWallpapers';
+import { useCannedResponses, useAppearanceSettings } from '../../hooks/useData';
 import {
   useInternalChat,
-  type InternalChatMessage,
+  toUiMessage,
+  type InternalChatMediaType,
   type InternalConversationItem,
 } from '../../hooks/useInternalChat';
 import { ContactAvatar } from '../ContactAvatar';
-import { VoiceRecorder } from '../chat/VoiceRecorder';
+import { MessageBubble } from '../chat/MessageBubble';
+import { MessageComposer } from '../chat/MessageComposer';
+import { MediaPreview } from '../chat/MediaPreview';
+import { WallpaperPicker } from '../chat/WallpaperPicker';
 import { detectMediaType, MAX_UPLOAD_BYTES } from '../chat/messageUtils';
+import type { Message } from '../../types';
 
 function previewText(msg: InternalConversationItem['lastMessage']): string {
   if (!msg) return 'Nenhuma mensagem ainda';
+  if (msg.deletedAt) return 'Mensagem apagada';
   if (msg.body?.trim()) {
     const t = msg.body.trim();
     return t.length > 40 ? `${t.slice(0, 40)}…` : t;
   }
   if (msg.type === 'IMAGE') return 'Enviou uma imagem';
   if (msg.type === 'AUDIO') return 'Enviou um áudio';
+  if (msg.type === 'VIDEO') return 'Enviou um vídeo';
+  if (msg.type === 'STICKER') return 'Enviou uma figurinha';
+  if (msg.type === 'FILE') return msg.mediaName || 'Enviou um arquivo';
   return 'Nova mensagem';
 }
 
-function InternalBubble({
-  message,
-  mine,
-}: {
-  message: InternalChatMessage;
-  mine: boolean;
-}) {
-  const url = mediaUrl(message.mediaUrl);
-  return (
-    <div className={`flex ${mine ? 'justify-end' : 'justify-start'} my-1 px-3`}>
-      <div
-        className={`max-w-[75%] rounded-2xl px-3 py-2 ${
-          mine
-            ? 'bg-brand-600 text-white rounded-br-md'
-            : 'bg-ink-800 text-ink-100 rounded-bl-md border border-ink-700'
-        } ${message._failed ? 'opacity-60' : ''} ${message._optimistic ? 'opacity-80' : ''}`}
-      >
-        {!mine && message.sender && (
-          <p className="text-[11px] font-semibold text-brand-300 mb-0.5">
-            {message.sender.name?.trim() || message.sender.username}
-          </p>
-        )}
-        {message.type === 'IMAGE' && url && (
-          <a href={url} target="_blank" rel="noreferrer" className="block mb-1">
-            <img src={url} alt="" className="rounded-lg max-h-56 object-cover" />
-          </a>
-        )}
-        {message.type === 'AUDIO' && url && (
-          <audio controls src={url} className="w-56 max-w-full my-1" />
-        )}
-        {message.body?.trim() && (
-          <p className="text-sm whitespace-pre-wrap break-words">{message.body}</p>
-        )}
-        <span
-          className={`text-[10px] mt-1 block ${mine ? 'text-white/70' : 'text-ink-400'}`}
-        >
-          {new Date(message.createdAt).toLocaleTimeString('pt-BR', {
-            hour: '2-digit',
-            minute: '2-digit',
-          })}
-          {message._failed ? ' · falhou' : ''}
-        </span>
-      </div>
-    </div>
-  );
+function toApiType(
+  mediaType: 'image' | 'audio' | 'file' | 'video' | 'sticker',
+): InternalChatMediaType {
+  switch (mediaType) {
+    case 'image':
+      return 'IMAGE';
+    case 'audio':
+      return 'AUDIO';
+    case 'video':
+      return 'VIDEO';
+    case 'sticker':
+      return 'STICKER';
+    default:
+      return 'FILE';
+  }
 }
 
 export function InternalChatView() {
   const { profile } = useAuth();
+  const { canned } = useCannedResponses();
+  const { settings: appearance, update: updateAppearance } = useAppearanceSettings();
   const {
     conversations,
     onlineUserIds,
@@ -89,20 +92,47 @@ export function InternalChatView() {
     typingUserIds,
     selectConversation,
     sendMessage,
+    editMessage,
+    deleteMessage,
     emitTyping,
   } = useInternalChat(profile?.id);
 
   const [search, setSearch] = useState('');
-  const [input, setInput] = useState('');
   const [uploading, setUploading] = useState(false);
-  const [sending, setSending] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [uploadStatusText, setUploadStatusText] = useState<string | null>(null);
+  const [replyingTo, setReplyingTo] = useState<Message | null>(null);
+  const [fileQueue, setFileQueue] = useState<File[]>([]);
+  const [fileError, setFileError] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [showWallpaperPicker, setShowWallpaperPicker] = useState(false);
+  const [localWallpaper, setLocalWallpaper] = useState(() => readLocalWallpaper());
+  const [recentStickers, setRecentStickers] = useState<RecentSticker[]>(() =>
+    loadRecentStickers(),
+  );
   const bottomRef = useRef<HTMLDivElement>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
+  const dragDepthRef = useRef(0);
   const typingTimer = useRef<number | null>(null);
+
+  const canEditWallpaper =
+    profile?.apiRole === 'ADMIN' || profile?.apiRole === 'SUPERVISOR';
+
+  const wallpaperKey =
+    localWallpaper?.wallpaperKey ?? appearance?.wallpaperKey ?? 'linen';
+  const customImageUrl =
+    localWallpaper?.customImageUrl ?? appearance?.customImageUrl ?? null;
+  const wallpaper = resolveWallpaper(wallpaperKey, customImageUrl);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages.length, typingUserIds.length]);
+
+  useEffect(() => {
+    setReplyingTo(null);
+    setFileQueue([]);
+    setFileError(null);
+    setShowWallpaperPicker(false);
+  }, [selected?.id, selected?.peer?.id]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -114,59 +144,291 @@ export function InternalChatView() {
     if (!typingUserIds.length || !selected) return null;
     const names = typingUserIds.map((id) => {
       const peer = conversations.find((c) => c.peer?.id === id)?.peer;
-      return peer?.name?.trim() || peer?.username || 'Alguém';
+      const fromMsg = messages.find((m) => m.senderId === id)?.sender;
+      return (
+        peer?.name?.trim() ||
+        peer?.username ||
+        fromMsg?.name?.trim() ||
+        fromMsg?.username ||
+        'Alguém'
+      );
     });
     if (names.length === 1) return `${names[0]} está digitando…`;
     return 'Várias pessoas estão digitando…';
-  }, [typingUserIds, selected, conversations]);
+  }, [typingUserIds, selected, conversations, messages]);
 
-  const handleInputChange = (value: string) => {
-    setInput(value);
-    emitTyping(true);
-    if (typingTimer.current) window.clearTimeout(typingTimer.current);
-    typingTimer.current = window.setTimeout(() => emitTyping(false), 1200);
-  };
+  const uiMessages = useMemo(
+    () => messages.map((m) => toUiMessage(m, profile?.id)),
+    [messages, profile?.id],
+  );
 
-  const handleSend = async () => {
-    const body = input.trim();
-    if (!body || sending) return;
-    setSending(true);
-    setInput('');
-    emitTyping(false);
-    try {
-      await sendMessage({ body, type: 'TEXT' });
-    } catch {
-      setInput(body);
-    } finally {
-      setSending(false);
+  const stickerUrls = useMemo(
+    () =>
+      messages
+        .filter((m) => m.type === 'STICKER' && m.mediaUrl)
+        .map((m) => m.mediaUrl as string),
+    [messages],
+  );
+
+  const mergedStickers = useMemo(
+    () => mergeRecentStickers(recentStickers, stickerUrls),
+    [recentStickers, stickerUrls],
+  );
+
+  const rememberSticker = useCallback((url: string) => {
+    setRecentStickers(pushRecentSticker(url));
+  }, []);
+
+  const handleSendText = async (body: string) => {
+    let finalBody = body;
+    if (body.startsWith('/')) {
+      const match = canned.find((c) => c.shortcut === body);
+      if (match) finalBody = match.body;
     }
+    emitTyping(false);
+    await sendMessage({
+      body: finalBody,
+      type: 'TEXT',
+      replyToMessageId: replyingTo?.id ?? null,
+    });
+    setReplyingTo(null);
   };
 
-  const uploadAndSend = async (file: File, type: 'IMAGE' | 'AUDIO') => {
-    if (file.size > MAX_UPLOAD_BYTES) {
-      alert('Arquivo muito grande');
+  const uploadAndSendMedia = async (
+    file: File | Blob,
+    fileName: string,
+    mediaType: 'image' | 'audio' | 'file' | 'video' | 'sticker',
+    caption: string | null,
+  ) => {
+    const size = 'size' in file ? file.size : 0;
+    if (size > MAX_UPLOAD_BYTES) {
+      throw new Error('Arquivo muito grande (máximo 50 MB)');
+    }
+    let asFile =
+      file instanceof File
+        ? file
+        : new File([file], fileName, {
+            type: (file as Blob).type || 'application/octet-stream',
+          });
+
+    // Compressão só de imagem (não figurinha/GIF animado).
+    if (mediaType === 'image') {
+      setUploadStatusText('Otimizando imagem…');
+      setUploadProgress(null);
+      asFile = await compressInternalChatImage(asFile);
+    }
+
+    setUploadStatusText(
+      asFile.size < size && mediaType === 'image'
+        ? 'Enviando imagem otimizada…'
+        : 'Enviando arquivo…',
+    );
+    setUploadProgress(0);
+
+    const url = await uploadInternalChatFile(asFile, (pct) => {
+      setUploadProgress(pct);
+    });
+
+    setUploadStatusText('Finalizando…');
+    await sendMessage({
+      type: toApiType(mediaType),
+      mediaUrl: url,
+      mediaName: asFile.name || fileName,
+      // APIs antigas esperam o nome do arquivo em `body` para FILE.
+      body:
+        caption?.trim() ||
+        (mediaType === 'file' || mediaType === 'video'
+          ? asFile.name || fileName
+          : ''),
+      replyToMessageId: replyingTo?.id ?? null,
+    });
+    if (mediaType === 'sticker') rememberSticker(url);
+    setReplyingTo(null);
+  };
+
+  const enqueueFiles = useCallback((files: File[]) => {
+    if (!files.length) return;
+    const tooBig = files.filter((f) => f.size > MAX_UPLOAD_BYTES);
+    const valid = files.filter((f) => f.size <= MAX_UPLOAD_BYTES);
+    if (tooBig.length && !valid.length) {
+      setFileError('Arquivo(s) muito grande(s) (máximo 50 MB)');
       return;
     }
+    if (tooBig.length) {
+      setFileError(`${tooBig.length} arquivo(s) ignorado(s) por exceder 50 MB`);
+    } else {
+      setFileError(null);
+    }
+    if (valid.length) setFileQueue((prev) => [...prev, ...valid]);
+  }, []);
+
+  const resetUploadUi = () => {
+    setUploading(false);
+    setUploadProgress(null);
+    setUploadStatusText(null);
+  };
+
+  const handleConfirmQueuedFile = async (file: File, caption: string) => {
     setUploading(true);
+    setFileError(null);
+    setUploadProgress(null);
+    setUploadStatusText('Preparando…');
     try {
-      const url = await uploadFile(file);
-      await sendMessage({
-        type,
-        mediaUrl: url,
-        body: type === 'IMAGE' ? '' : '',
-      });
+      const mediaType = detectMediaType(file.type, file.name);
+      await uploadAndSendMedia(
+        file,
+        file.name || 'arquivo',
+        mediaType,
+        caption || null,
+      );
+      setFileQueue((q) => q.slice(1));
+    } catch (err) {
+      setFileError(err instanceof Error ? err.message : 'Falha ao enviar arquivo');
     } finally {
-      setUploading(false);
+      resetUploadUi();
     }
   };
 
-  const onPickFiles = (files: FileList | null) => {
-    if (!files?.length) return;
-    const file = files[0];
-    const kind = detectMediaType(file.type);
-    if (kind === 'image') void uploadAndSend(file, 'IMAGE');
-    else if (kind === 'audio') void uploadAndSend(file, 'AUDIO');
-    else alert('Envie apenas imagem ou áudio no comunicador interno');
+  const handleSendAudio = async (blob: Blob, fileName: string) => {
+    setUploading(true);
+    setUploadProgress(null);
+    setUploadStatusText('Enviando áudio…');
+    try {
+      await uploadAndSendMedia(blob, fileName, 'audio', null);
+    } finally {
+      resetUploadUi();
+    }
+  };
+
+  const handleSendSticker = async (file: File) => {
+    setUploading(true);
+    setUploadProgress(null);
+    setUploadStatusText('Enviando figurinha…');
+    try {
+      await uploadAndSendMedia(
+        file,
+        file.name || 'sticker.webp',
+        'sticker',
+        null,
+      );
+    } finally {
+      resetUploadUi();
+    }
+  };
+
+  const handleSendStickerUrl = async (url: string) => {
+    setUploading(true);
+    setUploadProgress(null);
+    setUploadStatusText('Enviando figurinha…');
+    try {
+      await sendMessage({
+        type: 'STICKER',
+        mediaUrl: url,
+        mediaName: 'sticker.webp',
+        body: '',
+        replyToMessageId: replyingTo?.id ?? null,
+      });
+      rememberSticker(url);
+      setReplyingTo(null);
+    } finally {
+      resetUploadUi();
+    }
+  };
+
+  const handleEditMessage = async (message: Message, body: string) => {
+    await editMessage(message.id, body);
+  };
+
+  const handleDeleteMessage = async (message: Message) => {
+    await deleteMessage(message.id);
+  };
+
+  const handleWallpaperChange = async (id: string) => {
+    if (!canEditWallpaper) return;
+    const pref = { wallpaperKey: id, customImageUrl: null as string | null };
+    writeLocalWallpaper(pref);
+    setLocalWallpaper(pref);
+    if (profile?.apiRole === 'ADMIN') {
+      await updateAppearance({ wallpaperKey: id, customImageUrl: null });
+    }
+  };
+
+  const handleCustomWallpaper = async (url: string) => {
+    if (!canEditWallpaper) return;
+    const pref = { wallpaperKey: 'custom', customImageUrl: url };
+    writeLocalWallpaper(pref);
+    setLocalWallpaper(pref);
+    if (profile?.apiRole === 'ADMIN') {
+      await updateAppearance({ wallpaperKey: 'custom', customImageUrl: url });
+    }
+  };
+
+  const onDragEnter = (e: React.DragEvent) => {
+    if (!selected) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dragDepthRef.current += 1;
+    if (e.dataTransfer.types.includes('Files') || e.dataTransfer.types.includes('text/plain')) {
+      setIsDragging(true);
+    }
+  };
+
+  const onDragLeave = (e: React.DragEvent) => {
+    if (!selected) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dragDepthRef.current -= 1;
+    if (dragDepthRef.current <= 0) {
+      dragDepthRef.current = 0;
+      setIsDragging(false);
+    }
+  };
+
+  const onDragOver = (e: React.DragEvent) => {
+    if (!selected) return;
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const onDrop = (e: React.DragEvent) => {
+    if (!selected) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dragDepthRef.current = 0;
+    setIsDragging(false);
+
+    const collected: File[] = [];
+    if (e.dataTransfer.items?.length) {
+      for (const item of Array.from(e.dataTransfer.items)) {
+        if (item.kind !== 'file') continue;
+        // Ignora pastas (só arquivos, como no WhatsApp)
+        const entry = (
+          item as DataTransferItem & {
+            webkitGetAsEntry?: () => { isDirectory?: boolean } | null;
+          }
+        ).webkitGetAsEntry?.();
+        if (entry?.isDirectory) continue;
+        const f = item.getAsFile();
+        if (f) collected.push(f);
+      }
+    }
+    if (!collected.length && e.dataTransfer.files?.length) {
+      collected.push(...Array.from(e.dataTransfer.files));
+    }
+    // .txt no Chrome às vezes vira texto sem File — materializa como anexo
+    if (!collected.length) {
+      const plain = e.dataTransfer.getData('text/plain');
+      if (plain?.trim()) {
+        collected.push(
+          new File([plain], 'mensagem.txt', { type: 'text/plain' }),
+        );
+      }
+    }
+    if (!collected.length) {
+      setFileError('Solte arquivos (não pastas). Imagem, vídeo, áudio, PDF, TXT…');
+      return;
+    }
+    enqueueFiles(collected);
   };
 
   if (loading) {
@@ -176,6 +438,8 @@ export function InternalChatView() {
       </div>
     );
   }
+
+  const wallpaperStyle: CSSProperties | undefined = wallpaper.style;
 
   return (
     <div className="flex h-full overflow-hidden">
@@ -261,7 +525,37 @@ export function InternalChatView() {
       </div>
 
       {selected ? (
-        <div className="flex-1 flex flex-col min-w-0 bg-ink-950">
+        <div
+          className="flex-1 flex flex-col min-w-0 bg-ink-950 relative"
+          onDragEnter={onDragEnter}
+          onDragLeave={onDragLeave}
+          onDragOver={onDragOver}
+          onDrop={onDrop}
+        >
+          {fileQueue[0] && (
+            <MediaPreview
+              file={fileQueue[0]}
+              sending={uploading}
+              uploadProgress={uploadProgress}
+              uploadStatusText={uploadStatusText}
+              remainingCount={fileQueue.length - 1}
+              onCancel={() => !uploading && setFileQueue((q) => q.slice(1))}
+              onSkip={() => !uploading && setFileQueue((q) => q.slice(1))}
+              onCancelAll={() => !uploading && setFileQueue([])}
+              onSend={(file, caption) => void handleConfirmQueuedFile(file, caption)}
+            />
+          )}
+
+          {isDragging && (
+            <div className="absolute inset-0 z-30 bg-brand-600/20 border-2 border-dashed border-brand-400 rounded-lg flex items-center justify-center pointer-events-none m-1">
+              <div className="flex flex-col items-center gap-2 text-white bg-ink-900/90 px-6 py-4 rounded-xl shadow-xl">
+                <Upload className="w-8 h-8 text-brand-400" />
+                <p className="text-sm font-semibold">Solte os arquivos aqui</p>
+                <p className="text-xs text-ink-300">Envio em lote — até 50 MB por arquivo</p>
+              </div>
+            </div>
+          )}
+
           <div className="h-14 border-b border-ink-700 px-4 flex items-center gap-3 bg-ink-900">
             {selected.kind === 'GENERAL' ? (
               <div className="w-9 h-9 rounded-full bg-brand-600/30 flex items-center justify-center">
@@ -283,7 +577,7 @@ export function InternalChatView() {
                 />
               </div>
             )}
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <p className="text-sm font-semibold text-white truncate">{selected.title}</p>
               <p className="text-xs text-ink-400">
                 {selected.kind === 'GENERAL'
@@ -293,25 +587,58 @@ export function InternalChatView() {
                     : 'Offline'}
               </p>
             </div>
+            {canEditWallpaper && (
+              <button
+                type="button"
+                title="Papel de parede"
+                onClick={() => setShowWallpaperPicker((v) => !v)}
+                className={`btn-ghost p-1.5 ${showWallpaperPicker ? 'text-brand-400' : ''}`}
+              >
+                <ImageIcon className="w-4 h-4" />
+              </button>
+            )}
           </div>
 
-          <div className="flex-1 overflow-y-auto py-3">
+          {canEditWallpaper && showWallpaperPicker && (
+            <WallpaperPicker
+              selectedId={wallpaperKey}
+              customImageUrl={customImageUrl}
+              saving={false}
+              onSelect={(id) => void handleWallpaperChange(id)}
+              onCustomUploaded={(url) => void handleCustomWallpaper(url)}
+              onClose={() => setShowWallpaperPicker(false)}
+            />
+          )}
+
+          <div
+            className={`flex-1 overflow-y-auto py-3 ${wallpaper.className}`}
+            style={wallpaperStyle}
+          >
             {messagesLoading ? (
               <div className="flex justify-center py-10">
                 <Loader2 className="w-6 h-6 animate-spin text-brand-500" />
               </div>
-            ) : messages.length === 0 ? (
+            ) : uiMessages.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full text-ink-400">
                 <MessageCircleMore className="w-12 h-12 mb-3 opacity-30" />
                 <p className="text-sm">Nenhuma mensagem ainda</p>
                 <p className="text-xs mt-1">Envie a primeira mensagem para a equipe</p>
               </div>
             ) : (
-              messages.map((m) => (
-                <InternalBubble
+              uiMessages.map((m) => (
+                <MessageBubble
                   key={m.id}
                   message={m}
-                  mine={m.senderId === profile?.id}
+                  contactName={
+                    m.sender?.name ||
+                    selected.peer?.name ||
+                    selected.title
+                  }
+                  showSenderName={selected.kind === 'GENERAL'}
+                  deleteTitle="Excluir mensagem"
+                  onReply={setReplyingTo}
+                  onEdit={handleEditMessage}
+                  onDelete={handleDeleteMessage}
                 />
               ))
             )}
@@ -321,75 +648,34 @@ export function InternalChatView() {
             <div ref={bottomRef} />
           </div>
 
+          {fileError && (
+            <p className="px-3 py-1 text-xs text-danger-400 bg-ink-900">{fileError}</p>
+          )}
+
           <div className="border-t border-ink-700 p-3 bg-ink-900">
-            <div className="flex items-end gap-2">
-              <input
-                ref={fileRef}
-                type="file"
-                accept="image/*,audio/*"
-                className="hidden"
-                onChange={(e) => {
-                  onPickFiles(e.target.files);
-                  e.target.value = '';
-                }}
-              />
-              <button
-                type="button"
-                className="btn-ghost p-2"
-                title="Anexar imagem"
-                disabled={uploading || sending}
-                onClick={() => fileRef.current?.click()}
-              >
-                {uploading ? (
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                ) : (
-                  <Paperclip className="w-5 h-5" />
-                )}
-              </button>
-              <button
-                type="button"
-                className="btn-ghost p-2"
-                title="Imagem"
-                disabled={uploading || sending}
-                onClick={() => fileRef.current?.click()}
-              >
-                <ImageIcon className="w-5 h-5" />
-              </button>
-              <VoiceRecorder
-                disabled={uploading || sending}
-                onRecorded={(blob, fileName) => {
-                  const file = new File([blob], fileName, {
-                    type: blob.type || 'audio/webm',
-                  });
-                  void uploadAndSend(file, 'AUDIO');
-                }}
-              />
-              <textarea
-                value={input}
-                onChange={(e) => handleInputChange(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    void handleSend();
-                  }
-                }}
-                rows={1}
-                placeholder="Mensagem para a equipe…"
-                className="input flex-1 resize-none text-sm min-h-[40px] max-h-28"
-              />
-              <button
-                type="button"
-                className="btn-primary p-2.5"
-                disabled={!input.trim() || sending}
-                onClick={() => void handleSend()}
-              >
-                {sending ? (
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                ) : (
-                  <Send className="w-5 h-5" />
-                )}
-              </button>
-            </div>
+            <MessageComposer
+              contactName={selected.title}
+              replyingTo={replyingTo}
+              onCancelReply={() => setReplyingTo(null)}
+              onSendText={handleSendText}
+              onPickFiles={enqueueFiles}
+              onSendAudio={handleSendAudio}
+              onSendSticker={handleSendSticker}
+              onSendStickerUrl={handleSendStickerUrl}
+              recentStickers={mergedStickers}
+              canned={canned}
+              uploading={uploading}
+              uploadProgress={uploadProgress}
+              uploadStatusText={uploadStatusText}
+              onTyping={(typing) => {
+                emitTyping(typing);
+                if (typingTimer.current) window.clearTimeout(typingTimer.current);
+                if (typing) {
+                  typingTimer.current = window.setTimeout(() => emitTyping(false), 1200);
+                }
+              }}
+              placeholder="Mensagem interna… (use / para respostas rápidas)"
+            />
           </div>
         </div>
       ) : (

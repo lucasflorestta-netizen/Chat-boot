@@ -6,6 +6,7 @@ interface ConversationListItemProps {
   isSelected: boolean;
   onClick: () => void;
   onTagClick: (tagId: string) => void;
+  onPhotoError?: (contactId: string) => void;
 }
 
 function formatChatTime(iso: string): string {
@@ -57,6 +58,7 @@ export function ConversationListItem({
   isSelected,
   onClick,
   onTagClick,
+  onPhotoError,
 }: ConversationListItemProps) {
   const photo = ticket.contact?.profile_pic_url ?? null;
   const statusDot =
@@ -78,7 +80,15 @@ export function ConversationListItem({
       }`}
     >
       <div className="relative flex-shrink-0">
-        <ContactAvatar name={ticket.contact?.name} profilePicUrl={photo} size="md" />
+        <ContactAvatar
+          name={ticket.contact?.name}
+          profilePicUrl={photo}
+          size="md"
+          onImageError={() => {
+            const id = ticket.contact?.id;
+            if (id) onPhotoError?.(id);
+          }}
+        />
         <span
           className={`absolute bottom-0 right-0 w-2.5 h-2.5 ${statusDot} rounded-full border-2 border-ink-900`}
         />
@@ -101,6 +111,10 @@ export function ConversationListItem({
             {formatChatTime(timeSource)}
           </span>
         </div>
+
+        {ticket.protocolo && (
+          <p className="text-[10px] font-mono text-ink-400 truncate mt-0.5">{ticket.protocolo}</p>
+        )}
 
         <div className="flex items-center justify-between gap-2 mt-0.5">
           <p

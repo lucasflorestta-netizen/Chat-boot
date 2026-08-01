@@ -65,6 +65,33 @@ export const CHAT_WALLPAPERS: ChatWallpaper[] = [
 
 export const CUSTOM_WALLPAPER_ID = 'custom';
 
+const LOCAL_WALLPAPER_KEY = 'cc-chat-wallpaper';
+
+export type LocalWallpaperPref = {
+  wallpaperKey: string;
+  customImageUrl: string | null;
+};
+
+export function readLocalWallpaper(): LocalWallpaperPref | null {
+  try {
+    const raw = localStorage.getItem(LOCAL_WALLPAPER_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as LocalWallpaperPref;
+    if (parsed?.wallpaperKey) return parsed;
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+export function writeLocalWallpaper(pref: LocalWallpaperPref) {
+  try {
+    localStorage.setItem(LOCAL_WALLPAPER_KEY, JSON.stringify(pref));
+  } catch {
+    /* ignore */
+  }
+}
+
 export function resolveWallpaper(
   id: string,
   customImageUrl?: string | null,

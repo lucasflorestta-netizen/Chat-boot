@@ -6,6 +6,7 @@ import {
   useMessages,
 } from '../../hooks/useData';
 import { api, mediaUrl, uploadFile } from '../../lib/api';
+import { newClientId } from '../../lib/id';
 import { departmentLabel, mapMessage, toApiMediaType } from '../../lib/mappers';
 import {
   loadRecentStickers,
@@ -130,14 +131,32 @@ export function ChatDetail({
   const scrollRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
-  const forceScrollRef = useRef(false);
+  /** Abertura do ticket: pular direto para a última mensagem (estilo WhatsApp). */
+  const pendingInitialScrollRef = useRef(false);
   const prevMsgCountRef = useRef(0);
+  const [threadReady, setThreadReady] = useState(false);
 
-  const scrollToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
-    messagesEndRef.current?.scrollIntoView({ behavior });
+  const jumpToBottomInstant = useCallback(() => {
+    const el = scrollRef.current;
+    if (el) {
+      el.scrollTop = el.scrollHeight;
+    } else {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' });
+    }
     stickToBottomRef.current = true;
     setShowJumpLatest(false);
+    setThreadReady(true);
   }, []);
+
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
+    if (behavior === 'auto') {
+      jumpToBottomInstant();
+      return;
+    }
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    stickToBottomRef.current = true;
+    setShowJumpLatest(false);
+  }, [jumpToBottomInstant]);
 
   const handleScroll = () => {
     const el = scrollRef.current;
@@ -149,15 +168,22 @@ export function ChatDetail({
   };
 
   useEffect(() => {
-    const grew = messages.length > prevMsgCountRef.current;
-    prevMsgCountRef.current = messages.length;
+    if (msgLoading) return;
 
-    if (forceScrollRef.current) {
-      forceScrollRef.current = false;
-      scrollToBottom('smooth');
+    if (pendingInitialScrollRef.current) {
+      pendingInitialScrollRef.current = false;
+      prevMsgCountRef.current = messages.length;
+      // Duplo rAF: espera o DOM pintar as bolhas antes de posicionar
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          jumpToBottomInstant();
+        });
+      });
       return;
     }
 
+    const grew = messages.length > prevMsgCountRef.current;
+    prevMsgCountRef.current = messages.length;
     if (!grew) return;
 
     if (stickToBottomRef.current) {
@@ -165,14 +191,15 @@ export function ChatDetail({
     } else {
       setShowJumpLatest(true);
     }
-  }, [messages, scrollToBottom]);
+  }, [messages, msgLoading, jumpToBottomInstant, scrollToBottom]);
 
   useEffect(() => {
     setReplyingTo(null);
     setShowJumpLatest(false);
     stickToBottomRef.current = true;
-    forceScrollRef.current = true;
+    pendingInitialScrollRef.current = true;
     prevMsgCountRef.current = 0;
+    setThreadReady(false);
     setFileQueue([]);
     setFileError(null);
   }, [ticket.id]);
@@ -249,7 +276,7 @@ export function ChatDetail({
     }): Message => {
       const now = new Date().toISOString();
       return {
-        id: `temp-${crypto.randomUUID()}`,
+        id: `temp-${newClientId()}`,
         ticket_id: ticket.id,
         sender_type: 'agent',
         sender_id: profile!.id,
@@ -286,7 +313,7 @@ export function ChatDetail({
       },
     ) => {
       appendOptimistic(optimistic);
-      forceScrollRef.current = true;
+      stickToBottomRef.current = true;
 
       try {
         const data = await api<any>(`/tickets/${ticket.id}/messages`, {
@@ -375,7 +402,7 @@ export function ChatDetail({
     });
 
     appendOptimistic(optimistic);
-    forceScrollRef.current = true;
+    stickToBottomRef.current = true;
 
     try {
       const asFile =
@@ -410,7 +437,7 @@ export function ChatDetail({
   };
 
   const handleSendFile = async (file: File, caption: string) => {
-    const mediaType = detectMediaType(file.type);
+    const mediaType = detectMediaType(file.type, file.name);
     await uploadAndSendMedia(
       file,
       file.name,
@@ -584,8 +611,34 @@ export function ChatDetail({
     e.stopPropagation();
     dragDepthRef.current = 0;
     setIsDragging(false);
-    const files = Array.from(e.dataTransfer.files || []);
-    enqueueFiles(files);
+
+    const collected: File[] = [];
+    if (e.dataTransfer.items?.length) {
+      for (const item of Array.from(e.dataTransfer.items)) {
+        if (item.kind !== 'file') continue;
+        const entry = (
+          item as DataTransferItem & {
+            webkitGetAsEntry?: () => { isDirectory?: boolean } | null;
+          }
+        ).webkitGetAsEntry?.();
+        if (entry?.isDirectory) continue;
+        const f = item.getAsFile();
+        if (f) collected.push(f);
+      }
+    }
+    if (!collected.length && e.dataTransfer.files?.length) {
+      collected.push(...Array.from(e.dataTransfer.files));
+    }
+    // .txt no Chrome às vezes vira texto sem File — materializa como anexo
+    if (!collected.length) {
+      const plain = e.dataTransfer.getData('text/plain');
+      if (plain?.trim()) {
+        collected.push(
+          new File([plain], 'mensagem.txt', { type: 'text/plain' }),
+        );
+      }
+    }
+    enqueueFiles(collected);
   };
 
   return (
@@ -922,7 +975,9 @@ export function ChatDetail({
         <div
           ref={scrollRef}
           onScroll={handleScroll}
-          className={`h-full overflow-y-auto p-4 space-y-1.5 ${wallpaperClassName}`}
+          className={`h-full overflow-y-auto p-4 space-y-1.5 ${wallpaperClassName} ${
+            threadReady || msgLoading ? 'opacity-100' : 'opacity-0'
+          }`}
           style={wallpaperStyle}
         >
           {msgLoading ? (

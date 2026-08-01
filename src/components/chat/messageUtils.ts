@@ -40,10 +40,33 @@ export function replySnippet(message: Message): string {
   return mediaLabel(message.media_type);
 }
 
-export function detectMediaType(mime: string): 'image' | 'audio' | 'file' | 'video' {
-  if (mime.startsWith('image/')) return 'image';
-  if (mime.startsWith('audio/')) return 'audio';
-  if (mime.startsWith('video/')) return 'video';
+export function detectMediaType(
+  mime: string,
+  fileName?: string | null,
+): 'image' | 'audio' | 'file' | 'video' {
+  const m = (mime || '').toLowerCase();
+  if (m.startsWith('image/')) return 'image';
+  if (m.startsWith('audio/')) return 'audio';
+  if (m.startsWith('video/')) return 'video';
+
+  // Windows/Explorer às vezes entrega File sem MIME — usa a extensão.
+  const name = (fileName || '').toLowerCase();
+  const ext = name.includes('.') ? name.slice(name.lastIndexOf('.')) : '';
+  if (
+    ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg', '.heic', '.heif'].includes(
+      ext,
+    )
+  ) {
+    return 'image';
+  }
+  if (['.mp3', '.ogg', '.wav', '.m4a', '.aac', '.opus', '.webm'].includes(ext)) {
+    // .webm pode ser vídeo; sem MIME preferimos áudio só para nomes típicos de voice note
+    if (ext === '.webm' && !/audio|voice|ptt|grava/i.test(name)) return 'video';
+    return 'audio';
+  }
+  if (['.mp4', '.mov', '.avi', '.mkv', '.m4v', '.webm'].includes(ext)) {
+    return 'video';
+  }
   return 'file';
 }
 

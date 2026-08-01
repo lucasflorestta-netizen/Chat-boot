@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import type { Ticket } from '../../types';
 import { departmentLabel } from '../../lib/mappers';
+import { formatPhone } from '../../lib/formatPhone';
 import { ContactAvatar } from '../ContactAvatar';
 import { UserCheck } from 'lucide-react';
 
@@ -44,9 +45,19 @@ export function ChatHeader({
       <div className="flex-1 min-w-0">
         <p className="text-sm font-semibold text-white truncate">{ticket.contact?.name}</p>
         <p className="text-xs text-ink-300 flex items-center gap-1.5 flex-wrap">
-          {ticket.contact?.phone}
+          {ticket.protocolo && (
+            <>
+              <span className="font-mono font-bold text-brand-700" title="Protocolo">
+                {ticket.protocolo}
+              </span>
+              <span className="text-ink-500">·</span>
+            </>
+          )}
+          <span className="font-bold text-brand-700">
+            {formatPhone(ticket.contact?.phone)}
+          </span>
           <span className="text-ink-500">·</span>
-          <span className="text-brand-400">{departmentLabel(ticket.department)}</span>
+          <span className="font-bold text-brand-700">{departmentLabel(ticket.department)}</span>
           {ticket.assigned_agent && (
             <>
               <span className="text-ink-500">·</span>

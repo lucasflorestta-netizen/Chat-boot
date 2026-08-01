@@ -51,6 +51,16 @@ export function VoiceRecorder({ onRecorded, disabled, onBusyChange }: VoiceRecor
   const startRecording = async () => {
     setError(null);
     try {
+      if (typeof window !== 'undefined' && window.isSecureContext === false) {
+        setError(
+          'Microfone bloqueado neste HTTP. Após atualizar, abra o painel em https:// (mesmo IP/porta).',
+        );
+        return;
+      }
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setError('Este navegador não permite gravação de áudio.');
+        return;
+      }
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
 
@@ -94,6 +104,10 @@ export function VoiceRecorder({ onRecorded, disabled, onBusyChange }: VoiceRecor
         setError('Permissão do microfone negada. Libere o acesso nas configurações do navegador.');
       } else if (name === 'NotFoundError') {
         setError('Nenhum microfone encontrado.');
+      } else if (name === 'NotSupportedError' || name === 'SecurityError') {
+        setError(
+          'Gravação bloqueada neste endereço. Use o painel em https:// após a atualização.',
+        );
       } else {
         setError('Não foi possível iniciar a gravação de áudio.');
       }
@@ -164,7 +178,7 @@ export function VoiceRecorder({ onRecorded, disabled, onBusyChange }: VoiceRecor
 
   return (
     <div className="flex flex-col items-end">
-      {error && <p className="text-[10px] text-danger-400 mb-1 max-w-[200px] text-right">{error}</p>}
+      {error && <p className="text-[10px] text-danger-400 mb-1 max-w-[280px] text-right leading-snug">{error}</p>}
       <button
         type="button"
         onClick={startRecording}

@@ -14,6 +14,9 @@ export interface AuthContextValue {
   user: AuthUser | null;
   profile: Profile | null;
   profileError: string | null;
+  /** Aviso após login que desconectou outra sessão (navegador/aba). */
+  loginNotice: string | null;
+  clearLoginNotice: () => void;
   loading: boolean;
   signIn: (usernameOrEmail: string, password: string) => Promise<{ error: string | null }>;
   signUp: (email: string, password: string, name: string) => Promise<{ error: string | null }>;

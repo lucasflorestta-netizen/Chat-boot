@@ -7,6 +7,9 @@ interface MediaPreviewProps {
   onCancel: () => void;
   onSend: (file: File, caption: string) => void;
   sending?: boolean;
+  /** 0–100 enquanto envia (opcional; usado no comunicador interno). */
+  uploadProgress?: number | null;
+  uploadStatusText?: string | null;
   /** Remaining files after the current one (batch queue) */
   remainingCount?: number;
   onSkip?: () => void;
@@ -18,12 +21,14 @@ export function MediaPreview({
   onCancel,
   onSend,
   sending,
+  uploadProgress = null,
+  uploadStatusText = null,
   remainingCount = 0,
   onSkip,
   onCancelAll,
 }: MediaPreviewProps) {
   const [caption, setCaption] = useState('');
-  const mediaType = detectMediaType(file.type || '');
+  const mediaType = detectMediaType(file.type || '', file.name);
   const objectUrl = useMemo(() => URL.createObjectURL(file), [file]);
 
   useEffect(() => {
@@ -97,6 +102,25 @@ export function MediaPreview({
           className="input resize-none text-sm"
         />
 
+        {sending && (
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between gap-2 text-xs text-ink-300">
+              <span>{uploadStatusText || 'Enviando…'}</span>
+              {typeof uploadProgress === 'number' && (
+                <span className="tabular-nums text-ink-200">{uploadProgress}%</span>
+              )}
+            </div>
+            <div className="h-1.5 rounded-full bg-ink-800 overflow-hidden">
+              <div
+                className="h-full rounded-full bg-brand-500 transition-[width] duration-150 ease-out"
+                style={{
+                  width: `${Math.max(0, Math.min(100, uploadProgress ?? 8))}%`,
+                }}
+              />
+            </div>
+          </div>
+        )}
+
         <div className="flex justify-end gap-2 flex-wrap">
           {remainingCount > 0 && onSkip && (
             <button
@@ -124,7 +148,13 @@ export function MediaPreview({
             className="btn-primary text-sm px-3 py-1.5 flex items-center gap-1.5"
           >
             <Send className="w-3.5 h-3.5" />
-            {sending ? 'Enviando…' : remainingCount > 0 ? 'Enviar e próximo' : 'Enviar'}
+            {sending
+              ? typeof uploadProgress === 'number'
+                ? `Enviando ${uploadProgress}%`
+                : 'Enviando…'
+              : remainingCount > 0
+                ? 'Enviar e próximo'
+                : 'Enviar'}
           </button>
         </div>
       </div>

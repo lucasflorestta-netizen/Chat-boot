@@ -100,6 +100,12 @@ export function AuthScreen() {
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
+            {profileError && !error && (
+              <div className="flex items-start gap-2 p-3 bg-warning-500/10 border border-warning-500/30 rounded-lg text-sm text-warning-400">
+                <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                <span>{profileError}</span>
+              </div>
+            )}
             {mode === 'signup' && (
               <div>
                 <label className="label">Nome</label>

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
 import { connectSocket, getSocket } from '../lib/socket';
 import {
@@ -35,15 +35,67 @@ function upsertById<T extends { id: string }>(list: T[], item: T): T[] {
   return next;
 }
 
+/** Evita tela piscando ao voltar para Chat / Tickets (remount). */
+let ticketsCache: Ticket[] = [];
+const FINISHED_PAGE_SIZE = 80;
+
+type TicketsPage = {
+  items: any[];
+  hasMore: boolean;
+  nextOffset: number | null;
+};
+
+function parseTicketsResponse(data: unknown): TicketsPage {
+  if (Array.isArray(data)) {
+    return { items: data, hasMore: false, nextOffset: null };
+  }
+  if (data && typeof data === 'object' && Array.isArray((data as TicketsPage).items)) {
+    const page = data as TicketsPage;
+    return {
+      items: page.items,
+      hasMore: Boolean(page.hasMore),
+      nextOffset: page.nextOffset ?? null,
+    };
+  }
+  return { items: [], hasMore: false, nextOffset: null };
+}
+
+function mergeTicketsById(existing: Ticket[], incoming: Ticket[]): Ticket[] {
+  if (incoming.length === 0) return existing;
+  const byId = new Map(existing.map((t) => [t.id, t]));
+  for (const ticket of incoming) {
+    byId.set(ticket.id, ticket);
+  }
+  return [...byId.values()];
+}
+
 export function useTickets(_filter?: { status?: string; department?: string; assignedTo?: string }) {
-  const [tickets, setTickets] = useState<Ticket[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [tickets, setTickets] = useState<Ticket[]>(() => ticketsCache);
+  const [loading, setLoading] = useState(() => ticketsCache.length === 0);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMoreFinished, setHasMoreFinished] = useState(false);
+  const finishedOffsetRef = useRef(0);
 
   const fetchTickets = useCallback(async () => {
     try {
-      // Sem dedupe no servidor: o front ordena/deduplica estilo WhatsApp (max atividade por contato).
-      const data = await api<any[]>('/tickets?contactDedupe=false');
-      setTickets((data || []).map(mapTicket));
+      // 1) Abertos (conjunto pequeno) — operação não depende de histórico fechado.
+      // 2) Finalizados paginados + dedupe no servidor (1 card por contato).
+      const [openRaw, finishedRaw] = await Promise.all([
+        api<unknown>('/tickets?inbox=abertos'),
+        api<unknown>(
+          `/tickets?inbox=finalizados&contactDedupe=true&limit=${FINISHED_PAGE_SIZE}&offset=0`,
+        ),
+      ]);
+      const openPage = parseTicketsResponse(openRaw);
+      const finishedPage = parseTicketsResponse(finishedRaw);
+      const mapped = mergeTicketsById(
+        (openPage.items || []).map(mapTicket),
+        (finishedPage.items || []).map(mapTicket),
+      );
+      ticketsCache = mapped;
+      finishedOffsetRef.current = finishedPage.nextOffset ?? finishedPage.items.length;
+      setHasMoreFinished(finishedPage.hasMore);
+      setTickets(mapped);
     } catch (err) {
       console.error('Error fetching tickets:', err);
     } finally {
@@ -51,20 +103,49 @@ export function useTickets(_filter?: { status?: string; department?: string; ass
     }
   }, []);
 
+  const loadMoreFinished = useCallback(async () => {
+    if (loadingMore || !hasMoreFinished) return;
+    setLoadingMore(true);
+    try {
+      const offset = finishedOffsetRef.current;
+      const raw = await api<unknown>(
+        `/tickets?inbox=finalizados&contactDedupe=true&limit=${FINISHED_PAGE_SIZE}&offset=${offset}`,
+      );
+      const page = parseTicketsResponse(raw);
+      const mapped = (page.items || []).map(mapTicket);
+      setTickets((prev) => {
+        const next = mergeTicketsById(prev, mapped);
+        ticketsCache = next;
+        return next;
+      });
+      finishedOffsetRef.current = page.nextOffset ?? offset + mapped.length;
+      setHasMoreFinished(page.hasMore);
+    } catch (err) {
+      console.error('Error loading more finished tickets:', err);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [loadingMore, hasMoreFinished]);
+
   useEffect(() => {
-    fetchTickets();
+    void fetchTickets();
   }, [fetchTickets]);
 
   useEffect(() => {
     const socket = connectSocket();
 
+    const sync = (next: Ticket[]) => {
+      ticketsCache = next;
+      return next;
+    };
+
     const onCreated = (payload: { ticket: any }) => {
       if (!payload?.ticket) return;
-      setTickets((prev) => upsertById(prev, mapTicket(payload.ticket)));
+      setTickets((prev) => sync(upsertById(prev, mapTicket(payload.ticket))));
     };
     const onUpdated = (payload: { ticket: any }) => {
       if (!payload?.ticket) return;
-      setTickets((prev) => upsertById(prev, mapTicket(payload.ticket)));
+      setTickets((prev) => sync(upsertById(prev, mapTicket(payload.ticket))));
     };
     const onMessage = (payload: { ticket?: any; message?: any }) => {
       const rawTicket = payload?.ticket;
@@ -75,7 +156,7 @@ export function useTickets(_filter?: { status?: string; department?: string; ass
         const idx = prev.findIndex((t) => t.id === ticketId);
         if (idx === -1) {
           if (!rawTicket) return prev;
-          return upsertById(prev, mapTicket(rawTicket));
+          return sync(upsertById(prev, mapTicket(rawTicket)));
         }
 
         const existing = prev[idx];
@@ -122,7 +203,7 @@ export function useTickets(_filter?: { status?: string; department?: string; ass
         };
         const next = [...prev];
         next.splice(idx, 1);
-        return [merged, ...next];
+        return sync([merged, ...next]);
       });
     };
     const onContact = (payload?: { contact?: any }) => {
@@ -132,7 +213,8 @@ export function useTickets(_filter?: { status?: string; department?: string; ass
       }
       const mapped = mapContact(payload.contact);
       setTickets((prev) =>
-        prev.map((t) => {
+        sync(
+          prev.map((t) => {
           if (t.contact_id !== mapped.id && t.contact?.id !== mapped.id) {
             return t;
           }
@@ -155,6 +237,7 @@ export function useTickets(_filter?: { status?: string; department?: string; ass
             },
           };
         }),
+        ),
       );
     };
 
@@ -185,7 +268,14 @@ export function useTickets(_filter?: { status?: string; department?: string; ass
     };
   }, [fetchTickets]);
 
-  return { tickets, loading, refetch: fetchTickets };
+  return {
+    tickets,
+    loading,
+    loadingMore,
+    hasMoreFinished,
+    loadMoreFinished,
+    refetch: fetchTickets,
+  };
 }
 
 export function useMessages(ticketId: string | null) {
@@ -539,6 +629,18 @@ export function useWhatsappConnection() {
     }
   }, []);
 
+  const markSyncing = useCallback(() => {
+    setConnection((prev) =>
+      mapWhatsappStatus({
+        status: 'syncing',
+        qr: prev?.qr_code ?? null,
+        phoneNumber: prev?.phone_number ?? null,
+        lastConnectedAt: prev?.last_connected_at ?? null,
+        hasQr: !!prev?.qr_code,
+      }),
+    );
+  }, []);
+
   useEffect(() => {
     refetch();
   }, [refetch]);
@@ -562,7 +664,7 @@ export function useWhatsappConnection() {
       setConnection((prev) =>
         mapWhatsappStatus({
           ...payload,
-          qr: payload?.hasQr === false ? null : prev?.qr_code,
+          qr: payload?.hasQr === false ? null : (payload?.qr ?? prev?.qr_code),
         }),
       );
     };
@@ -576,7 +678,7 @@ export function useWhatsappConnection() {
     };
   }, []);
 
-  return { connection, loading, refetch };
+  return { connection, loading, refetch, markSyncing };
 }
 
 export function useNpsRatings() {

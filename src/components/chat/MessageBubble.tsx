@@ -1,8 +1,9 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Check,
   Eye,
   FileText,
+  ImageOff,
   Paperclip,
   Pencil,
   Reply,
@@ -10,6 +11,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
+import { mediaUrl } from '../../lib/api';
 import type { Message } from '../../types';
 import { FormattedText } from './FormattedText';
 import { MessageStatus } from './MessageStatus';
@@ -21,6 +23,10 @@ interface MessageBubbleProps {
   onReply?: (message: Message) => void;
   onEdit?: (message: Message, body: string) => Promise<void>;
   onDelete?: (message: Message) => Promise<void>;
+  /** Show sender name above the bubble (e.g. group / internal general). */
+  showSenderName?: boolean;
+  /** Tooltip for the delete action. */
+  deleteTitle?: string;
 }
 
 export function MessageBubble({
@@ -29,6 +35,8 @@ export function MessageBubble({
   onReply,
   onEdit,
   onDelete,
+  showSenderName = false,
+  deleteTitle = 'Excluir para o cliente',
 }: MessageBubbleProps) {
   const isClient = message.sender_type === 'client';
   const isNote = message.media_type === 'note';
@@ -43,7 +51,13 @@ export function MessageBubble({
   const [deleting, setDeleting] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [mediaBroken, setMediaBroken] = useState(false);
+  const resolvedMedia = mediaUrl(message.media_url) ?? message.media_url;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    setMediaBroken(false);
+  }, [message.id, message.media_url]);
   const canReply = Boolean(onReply) && !isNote && !isSystem && !message._localStatus;
   const canEdit =
     Boolean(onEdit) &&
@@ -51,6 +65,7 @@ export function MessageBubble({
     !isNote &&
     !isSystem &&
     !isSoftDeleted &&
+    message.media_type === 'text' &&
     Boolean(message.body?.trim()) &&
     !message._localStatus;
   const canDelete =
@@ -152,33 +167,75 @@ export function MessageBubble({
     }
   };
 
+  const mediaUnavailable = (
+    <div
+      className={`flex items-center gap-2 mb-2 rounded-lg p-2.5 text-xs text-white/70 ${
+        isClient ? 'bg-ink-800/80' : 'bg-black/15'
+      }`}
+    >
+      <ImageOff className="w-4 h-4 shrink-0" />
+      <span>Mídia indisponível</span>
+    </div>
+  );
+
+  const isMediaKind = ['image', 'audio', 'video', 'sticker', 'file'].includes(
+    message.media_type,
+  );
+  const mediaMissing = isMediaKind && (!resolvedMedia || mediaBroken);
+  const placeholderBody =
+    !!message.body &&
+    /^\[(Áudio|Imagem|Vídeo|Sticker|Arquivo(?::[^\]]*)?)\]$/i.test(
+      message.body.trim(),
+    );
+  const showBody = !!message.body && !(mediaMissing && placeholderBody);
+
   const mediaAndBody = (
     <>
-      {message.media_type === 'image' && message.media_url && (
+      {message.media_type === 'image' && resolvedMedia && !mediaBroken && (
         <button
           type="button"
           className="block mb-2 max-w-full"
-          onClick={() => setLightboxUrl(message.media_url)}
+          onClick={() => setLightboxUrl(resolvedMedia)}
         >
           <img
-            src={message.media_url}
+            src={resolvedMedia}
             alt={message.media_name || ''}
             className="rounded-lg max-w-full max-h-72 object-cover cursor-zoom-in"
+            onError={() => setMediaBroken(true)}
           />
         </button>
       )}
-      {message.media_type === 'sticker' && message.media_url && (
-        <img src={message.media_url} alt="Sticker" className="mb-2 max-w-[160px]" />
+      {message.media_type === 'image' && (!resolvedMedia || mediaBroken) && mediaUnavailable}
+      {message.media_type === 'sticker' && resolvedMedia && !mediaBroken && (
+        <img
+          src={resolvedMedia}
+          alt="Sticker"
+          className="mb-2 max-w-[160px]"
+          onError={() => setMediaBroken(true)}
+        />
       )}
-      {message.media_type === 'audio' && message.media_url && (
-        <audio controls src={message.media_url} className="w-full min-w-[220px] mb-2" />
+      {message.media_type === 'sticker' && (!resolvedMedia || mediaBroken) && mediaUnavailable}
+      {message.media_type === 'audio' && resolvedMedia && !mediaBroken && (
+        <audio
+          controls
+          src={resolvedMedia}
+          className="w-full min-w-[220px] mb-2"
+          onError={() => setMediaBroken(true)}
+        />
       )}
-      {message.media_type === 'video' && message.media_url && (
-        <video controls src={message.media_url} className="rounded-lg mb-2 max-w-full max-h-72" />
+      {message.media_type === 'audio' && (!resolvedMedia || mediaBroken) && mediaUnavailable}
+      {message.media_type === 'video' && resolvedMedia && !mediaBroken && (
+        <video
+          controls
+          src={resolvedMedia}
+          className="rounded-lg mb-2 max-w-full max-h-72"
+          onError={() => setMediaBroken(true)}
+        />
       )}
-      {message.media_type === 'file' && message.media_url && (
+      {message.media_type === 'video' && (!resolvedMedia || mediaBroken) && mediaUnavailable}
+      {message.media_type === 'file' && resolvedMedia && (
         <a
-          href={message.media_url}
+          href={resolvedMedia}
           download={message.media_name || ''}
           target="_blank"
           rel="noreferrer"
@@ -199,9 +256,10 @@ export function MessageBubble({
           </div>
         </a>
       )}
-      {message.body && (
+      {message.media_type === 'file' && !resolvedMedia && mediaUnavailable}
+      {showBody && (
         <FormattedText
-          text={message.body}
+          text={message.body!}
           className="text-sm text-white whitespace-pre-wrap break-words"
         />
       )}
@@ -214,7 +272,11 @@ export function MessageBubble({
       <div className="mt-2 flex items-center gap-1.5 rounded-md bg-black/35 px-2 py-1.5 text-warning-300">
         <Eye className="w-3.5 h-3.5 shrink-0" />
         <span className="text-xs italic">
-          {deletedForClient ? 'Apagada para o cliente' : 'Apagada pelo cliente'}
+          {deletedForClient
+            ? 'Apagada para o cliente'
+            : message.deleted_by_client
+              ? 'Apagada pelo cliente'
+              : 'Mensagem apagada'}
         </span>
       </div>
     </div>
@@ -246,8 +308,8 @@ export function MessageBubble({
                   onClick={(e) => void handleDeleteClick(e)}
                   disabled={deleting}
                   className="opacity-0 group-hover/row:opacity-100 transition-opacity btn-ghost p-1.5 rounded-full bg-ink-800/80 border border-ink-600 disabled:opacity-40"
-                  title="Excluir para o cliente"
-                  aria-label="Excluir para o cliente"
+                  title={deleteTitle}
+                  aria-label={deleteTitle}
                 >
                   <Trash2 className="w-3.5 h-3.5 text-ink-200" />
                 </button>
@@ -276,6 +338,12 @@ export function MessageBubble({
                 isClient ? 'bg-ink-700' : 'bg-brand-600'
               } rounded-tr-lg rounded-bl-lg`}
             />
+
+            {showSenderName && isClient && message.sender?.name && !editing && (
+              <p className="text-[11px] font-semibold text-brand-300 mb-1 truncate">
+                {message.sender.name}
+              </p>
+            )}
 
             {message.reply_to && !editing && (
               <div

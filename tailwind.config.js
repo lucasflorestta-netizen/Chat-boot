@@ -4,21 +4,21 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Deep blue / black palette
+        // Paleta via CSS vars — troca claro/escuro sem reescrever componentes
         ink: {
-          950: '#06080f',
-          900: '#0a0e1a',
-          850: '#0d1320',
-          800: '#111827',
-          750: '#161e2e',
-          700: '#1c2536',
-          600: '#243044',
-          500: '#2d3a52',
-          400: '#3b4a66',
-          300: '#52617d',
-          200: '#7a87a3',
-          100: '#b0bbd0',
-          50: '#e2e8f0',
+          950: 'rgb(var(--ink-950) / <alpha-value>)',
+          900: 'rgb(var(--ink-900) / <alpha-value>)',
+          850: 'rgb(var(--ink-850) / <alpha-value>)',
+          800: 'rgb(var(--ink-800) / <alpha-value>)',
+          750: 'rgb(var(--ink-750) / <alpha-value>)',
+          700: 'rgb(var(--ink-700) / <alpha-value>)',
+          600: 'rgb(var(--ink-600) / <alpha-value>)',
+          500: 'rgb(var(--ink-500) / <alpha-value>)',
+          400: 'rgb(var(--ink-400) / <alpha-value>)',
+          300: 'rgb(var(--ink-300) / <alpha-value>)',
+          200: 'rgb(var(--ink-200) / <alpha-value>)',
+          100: 'rgb(var(--ink-100) / <alpha-value>)',
+          50: 'rgb(var(--ink-50) / <alpha-value>)',
         },
         brand: {
           50: '#eff6ff',

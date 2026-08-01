@@ -2,6 +2,45 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Tema escuro (padrão) — RGB channels p/ alpha do Tailwind */
+:root,
+html.theme-dark {
+  color-scheme: dark;
+  --ink-950: 6 8 15;
+  --ink-900: 10 14 26;
+  --ink-850: 13 19 32;
+  --ink-800: 17 24 39;
+  --ink-750: 22 30 46;
+  --ink-700: 28 37 54;
+  --ink-600: 36 48 68;
+  --ink-500: 45 58 82;
+  --ink-400: 59 74 102;
+  --ink-300: 82 97 125;
+  --ink-200: 122 135 163;
+  --ink-100: 176 187 208;
+  --ink-50: 226 232 240;
+  --fg-strong: 255 255 255;
+}
+
+/* Tema claro estilo WhatsApp */
+html.theme-light {
+  color-scheme: light;
+  --ink-950: 240 242 245;
+  --ink-900: 255 255 255;
+  --ink-850: 247 248 250;
+  --ink-800: 241 243 244;
+  --ink-750: 233 237 239;
+  --ink-700: 229 231 235;
+  --ink-600: 209 213 219;
+  --ink-500: 156 163 175;
+  --ink-400: 107 114 128;
+  --ink-300: 75 85 99;
+  --ink-200: 55 65 81;
+  --ink-100: 31 41 55;
+  --ink-50: 17 24 39;
+  --fg-strong: 17 27 33;
+}
+
 @layer base {
   * {
     @apply border-ink-700;
@@ -13,9 +52,16 @@
     @apply bg-ink-950 text-ink-100 antialiased;
     font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
   }
+  html.theme-light body {
+    color: rgb(var(--fg-strong));
+  }
+  /* text-white vira texto escuro no tema claro (chrome do app) */
+  html.theme-light .text-white {
+    color: rgb(var(--fg-strong)) !important;
+  }
   option {
-    background-color: #111827;
-    color: #e2e8f0;
+    background-color: rgb(var(--ink-800));
+    color: rgb(var(--ink-100));
   }
   ::-webkit-scrollbar {
     width: 8px;
@@ -42,6 +88,9 @@
   .btn-primary {
     @apply btn bg-brand-600 hover:bg-brand-500 text-white shadow-lg shadow-brand-900/30;
   }
+  html.theme-light .btn-primary {
+    color: #fff !important;
+  }
   .btn-secondary {
     @apply btn bg-ink-700 hover:bg-ink-600 text-ink-100;
   }
@@ -50,6 +99,9 @@
   }
   .btn-danger {
     @apply btn bg-danger-600 hover:bg-danger-500 text-white;
+  }
+  html.theme-light .btn-danger {
+    color: #fff !important;
   }
   .input {
     @apply w-full bg-ink-800 border border-ink-600 rounded-lg px-3 py-2 text-sm text-ink-100 placeholder-ink-300 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-all;
@@ -100,4 +152,13 @@
 
 .chat-bg--custom {
   background-color: #f3f4f6;
+}
+
+/* Tema claro: fundo do chat um pouco mais suave */
+html.theme-dark .chat-bg--linen,
+html.theme-dark .chat-bg--mist,
+html.theme-dark .chat-bg--sage,
+html.theme-dark .chat-bg--sand,
+html.theme-dark .chat-bg--sky {
+  filter: none;
 }

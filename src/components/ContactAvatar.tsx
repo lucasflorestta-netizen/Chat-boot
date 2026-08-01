@@ -6,6 +6,8 @@ interface ContactAvatarProps {
   size?: 'sm' | 'md' | 'lg';
   className?: string;
   rounded?: 'full' | 'lg' | '2xl';
+  /** Chamado uma vez quando a imagem falha (CDN morto / 404). */
+  onImageError?: () => void;
 }
 
 const sizeClasses = {
@@ -20,6 +22,7 @@ export function ContactAvatar({
   size = 'md',
   className = '',
   rounded = 'full',
+  onImageError,
 }: ContactAvatarProps) {
   const [imgFailed, setImgFailed] = useState(false);
   const initial = name?.charAt(0).toUpperCase() || '?';
@@ -41,7 +44,10 @@ export function ContactAvatar({
         loading="lazy"
         decoding="async"
         className={`${sizeClasses[size]} ${roundedClass} object-cover flex-shrink-0 ${className}`}
-        onError={() => setImgFailed(true)}
+        onError={() => {
+          setImgFailed(true);
+          onImageError?.();
+        }}
       />
     );
   }

@@ -1,15 +1,19 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { api, getToken, setToken } from '../lib/api';
+import { api, getToken, SESSION_EXPIRED_EVENT, setToken } from '../lib/api';
 import { connectSocket, disconnectSocket, reconnectSocketWithToken } from '../lib/socket';
 import { mapProfile } from '../lib/mappers';
 import type { Profile } from '../types';
 import { AuthContext, type AuthSession, type AuthUser } from './auth-context';
+
+const REPLACED_SESSION_MSG =
+  'Este usuário estava logado em outro navegador ou aba e foi desconectado.';
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<AuthSession | null>(null);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [profileError, setProfileError] = useState<string | null>(null);
+  const [loginNotice, setLoginNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   const applyAuth = (token: string, rawUser: unknown) => {
@@ -28,6 +32,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
     setProfile(null);
     setProfileError(null);
+    setLoginNotice(null);
     disconnectSocket();
   };
 
@@ -53,6 +58,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     setSession({ access_token: token });
     fetchMe().finally(() => setLoading(false));
+  }, []);
+
+  // 401 da API / evento WS (sessão única) → volta ao login com aviso.
+  useEffect(() => {
+    const onExpired = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ message?: string }>).detail;
+      setToken(null);
+      setSession(null);
+      setUser(null);
+      setProfile(null);
+      setLoginNotice(null);
+      setProfileError(
+        detail?.message ||
+          'Sessão encerrada — este usuário entrou em outro navegador ou aba',
+      );
+      disconnectSocket();
+    };
+    window.addEventListener(SESSION_EXPIRED_EVENT, onExpired);
+    return () => window.removeEventListener(SESSION_EXPIRED_EVENT, onExpired);
   }, []);
 
   // Keep own presence in sync when API cron (or admin) updates status
@@ -83,11 +107,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signIn = async (usernameOrEmail: string, password: string) => {
     try {
-      const data = await api<{ access_token: string; user: unknown }>('/auth/login', {
+      const data = await api<{
+        access_token: string;
+        user: unknown;
+        replacedPreviousSession?: boolean;
+        message?: string;
+      }>('/auth/login', {
         method: 'POST',
         body: JSON.stringify({ username: usernameOrEmail, password }),
       });
       applyAuth(data.access_token, data.user);
+      if (data.replacedPreviousSession) {
+        setLoginNotice(data.message?.trim() || REPLACED_SESSION_MSG);
+      } else {
+        setLoginNotice(null);
+      }
       return { error: null };
     } catch (err) {
       return { error: err instanceof Error ? err.message : 'Falha no login' };
@@ -106,6 +140,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }),
       });
       applyAuth(data.access_token, data.user);
+      setLoginNotice(null);
       return { error: null };
     } catch (err) {
       return { error: err instanceof Error ? err.message : 'Falha no cadastro' };
@@ -125,6 +160,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setProfile((prev) => (prev ? { ...prev, ...partial } : prev));
   };
 
+  const clearLoginNotice = () => setLoginNotice(null);
+
   return (
     <AuthContext.Provider
       value={{
@@ -132,6 +169,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         user,
         profile,
         profileError,
+        loginNotice,
+        clearLoginNotice,
         loading,
         signIn,
         signUp,

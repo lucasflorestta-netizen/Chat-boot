@@ -4,22 +4,47 @@ import { useWhatsappConnection } from '../../context/useWhatsappConnection';
 import { api } from '../../lib/api';
 import { QrCode, RefreshCw, Wifi, WifiOff, Loader2, AlertCircle } from 'lucide-react';
 
+const QR_POLL_MS = 2000;
+const QR_WAIT_TIMEOUT_MS = 60_000;
+
 export function WhatsappView() {
-  const { connection, loading, refetch } = useWhatsappConnection();
+  const { connection, loading, refetch, markSyncing } = useWhatsappConnection();
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [apiWarning, setApiWarning] = useState(false);
+  /** Mantém poll/UI em syncing mesmo se a API ainda reportar disconnected. */
+  const [awaitingQr, setAwaitingQr] = useState(false);
   const generateLock = useRef(false);
 
   useEffect(() => {
-    if (connection?.status !== 'syncing' || connection?.qr_code) return;
-    const interval = setInterval(() => {
-      void refetch();
-    }, 2000);
-    return () => clearInterval(interval);
-  }, [connection?.status, connection?.qr_code, refetch]);
+    if (connection?.qr_code) {
+      setAwaitingQr(false);
+      setApiWarning(false);
+    }
+  }, [connection?.qr_code]);
 
   useEffect(() => {
+    const shouldPoll =
+      awaitingQr ||
+      (connection?.status === 'syncing' && !connection?.qr_code);
+    if (!shouldPoll) return;
+    const interval = setInterval(() => {
+      void refetch();
+    }, QR_POLL_MS);
+    return () => clearInterval(interval);
+  }, [awaitingQr, connection?.status, connection?.qr_code, refetch]);
+
+  useEffect(() => {
+    if (!awaitingQr) return;
+    const timer = setTimeout(() => {
+      setAwaitingQr(false);
+      setApiWarning(true);
+    }, QR_WAIT_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [awaitingQr]);
+
+  useEffect(() => {
+    if (awaitingQr) return;
     if (connection?.status !== 'syncing') {
       setApiWarning(false);
       return;
@@ -30,9 +55,9 @@ export function WhatsappView() {
     }
     const timer = setTimeout(() => {
       setApiWarning(true);
-    }, 20000);
+    }, 20_000);
     return () => clearTimeout(timer);
-  }, [connection?.status, connection?.qr_code]);
+  }, [awaitingQr, connection?.status, connection?.qr_code]);
 
   const handleGenerateQR = async () => {
     if (generateLock.current) return;
@@ -40,11 +65,14 @@ export function WhatsappView() {
     setGenerating(true);
     setError(null);
     setApiWarning(false);
+    setAwaitingQr(true);
+    markSyncing();
 
     try {
       await api('/whatsapp/connect', { method: 'POST' });
       await refetch();
     } catch (err) {
+      setAwaitingQr(false);
       setError(err instanceof Error ? err.message : 'Falha ao conectar WhatsApp');
     } finally {
       setGenerating(false);
@@ -54,6 +82,7 @@ export function WhatsappView() {
 
   const handleDisconnect = async () => {
     setError(null);
+    setAwaitingQr(false);
     try {
       await api('/whatsapp/disconnect', { method: 'POST' });
       await refetch();
@@ -70,7 +99,12 @@ export function WhatsappView() {
     );
   }
 
-  const status = connection?.status || 'disconnected';
+  const status =
+    connection?.status === 'connected'
+      ? 'connected'
+      : awaitingQr || connection?.status === 'syncing'
+        ? 'syncing'
+        : 'disconnected';
 
   return (
     <div className="p-6 space-y-6 max-w-2xl mx-auto">
@@ -89,9 +123,10 @@ export function WhatsappView() {
         <div className="card p-4 border-warning-500/30 bg-warning-500/10 text-sm text-warning-400 flex items-start gap-2">
           <AlertCircle className="w-5 h-5 flex-shrink-0" />
           <div>
-            <p className="font-medium text-white">API WhatsApp offline</p>
+            <p className="font-medium text-white">QR Code não chegou a tempo</p>
             <p className="mt-1 text-ink-300">
-              Verifique se a API Nest está rodando e se o módulo WhatsApp iniciou corretamente.
+              Confirme que está em HTTPS (https://IP:3001), que os serviços estão Running e tente
+              &quot;Atualizar QR&quot; de novo. Se persistir, rode o atualizador com o patch Baileys.
             </p>
           </div>
         </div>

@@ -15,13 +15,15 @@ import {
   Bell,
   Volume2,
   VolumeX,
-  SlidersHorizontal,
   WifiOff,
   StickyNote,
   ChevronDown,
+  Moon,
+  Sun,
 } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { api } from '../../lib/api';
+import { newClientId } from '../../lib/id';
 import {
   AGENT_STATUS_OPTIONS,
   agentStatusBadgeClass,
@@ -33,6 +35,7 @@ import {
   resolveBrandLogoSrc,
   writeStoredBrand,
 } from '../../lib/brand';
+import { readStoredTheme, toggleTheme, type UiTheme } from '../../lib/theme';
 import type { AgentStatus } from '../../types';
 import { AvatarUploadButton } from '../AvatarUploadButton';
 import { useAppearanceSettings } from '../../hooks/useData';
@@ -47,7 +50,6 @@ export type TabId =
   | 'users'
   | 'whatsapp'
   | 'auto-messages'
-  | 'settings'
   | 'tags'
   | 'canned'
   | 'comunicador-interno'
@@ -67,7 +69,6 @@ const navItems: NavItem[] = [
   { id: 'users', label: 'Usuários', icon: <Users className="w-5 h-5" />, adminOnly: true },
   { id: 'whatsapp', label: 'Conexão WhatsApp', icon: <QrCode className="w-5 h-5" />, adminOnly: true },
   { id: 'auto-messages', label: 'Mensagens Automáticas', icon: <Settings className="w-5 h-5" />, adminOnly: true },
-  { id: 'settings', label: 'Configurações', icon: <SlidersHorizontal className="w-5 h-5" />, adminOnly: true },
   { id: 'tags', label: 'Etiquetas', icon: <Tag className="w-5 h-5" />, adminOnly: true },
   { id: 'canned', label: 'Respostas Rápidas', icon: <Zap className="w-5 h-5" />, adminOnly: true },
   { id: 'comunicador-interno', label: 'Comunicador Interno', icon: <MessageCircleMore className="w-5 h-5" /> },
@@ -77,7 +78,6 @@ const navItems: NavItem[] = [
 interface SidebarProps {
   active: TabId;
   onNavigate: (tab: TabId) => void;
-  unreadCount: number;
   internalUnreadCount?: number;
   soundEnabled: boolean;
   onToggleSound: () => void;
@@ -87,7 +87,6 @@ interface SidebarProps {
 export function Sidebar({
   active,
   onNavigate,
-  unreadCount,
   internalUnreadCount = 0,
   soundEnabled,
   onToggleSound,
@@ -105,6 +104,7 @@ export function Sidebar({
   const [statusSaving, setStatusSaving] = useState(false);
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
   const [presenceOpen, setPresenceOpen] = useState(false);
+  const [theme, setTheme] = useState<UiTheme>(() => readStoredTheme());
   const statusMenuRef = useRef<HTMLDivElement>(null);
   const [notepadWindows, setNotepadWindows] = useState<
     Array<{
@@ -166,7 +166,7 @@ export function Sidebar({
     setNotepadWindows((prev) => [
       ...prev,
       {
-        windowKey: crypto.randomUUID(),
+        windowKey: newClientId(),
         minimized: false,
         zIndex: notepadZRef.current,
         offset,
@@ -237,11 +237,6 @@ export function Sidebar({
               >
                 {item.icon}
                 <span className="flex-1 text-left">{item.label}</span>
-                {item.id === 'chat' && unreadCount > 0 && (
-                  <span className="badge bg-danger-500 text-white px-1.5 min-w-[20px] justify-center">
-                    {unreadCount}
-                  </span>
-                )}
                 {item.id === 'comunicador-interno' && internalUnreadCount > 0 && (
                   <span className="badge bg-danger-500 text-white px-1.5 min-w-[20px] justify-center">
                     {internalUnreadCount}
@@ -294,6 +289,15 @@ export function Sidebar({
             aria-label="Bloco de Notas"
           >
             <StickyNote className="w-4 h-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setTheme(toggleTheme())}
+            className="btn-ghost px-2.5 py-2"
+            title={theme === 'light' ? 'Tema claro — clicar para escuro' : 'Tema escuro — clicar para claro'}
+            aria-label="Alternar tema claro/escuro"
+          >
+            {theme === 'light' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
           </button>
           <button
             onClick={onToggleSound}

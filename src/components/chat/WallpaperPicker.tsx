@@ -7,8 +7,8 @@ interface WallpaperPickerProps {
   selectedId: string;
   customImageUrl?: string | null;
   saving?: boolean;
-  onSelect: (id: string) => void;
-  onCustomUploaded: (url: string) => void;
+  onSelect: (id: string) => void | Promise<void>;
+  onCustomUploaded: (url: string) => void | Promise<void>;
   onClose: () => void;
 }
 
@@ -31,6 +31,17 @@ export function WallpaperPicker({
       ? 'Personalizado'
       : (CHAT_WALLPAPERS.find((w) => w.id === selectedId)?.label ?? 'Linho');
 
+  const handleSelect = async (id: string) => {
+    if (busy) return;
+    setError(null);
+    try {
+      await onSelect(id);
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Falha ao salvar');
+    }
+  };
+
   const handleFile = async (file: File | undefined) => {
     if (!file || busy) return;
     if (!file.type.startsWith('image/')) {
@@ -41,7 +52,7 @@ export function WallpaperPicker({
     setUploading(true);
     try {
       const url = await uploadFile(file);
-      onCustomUploaded(url);
+      await onCustomUploaded(url);
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Falha no upload');
@@ -65,8 +76,7 @@ export function WallpaperPicker({
                 title={w.label}
                 disabled={busy}
                 onClick={() => {
-                  onSelect(w.id);
-                  onClose();
+                  void handleSelect(w.id);
                 }}
                 className={`relative aspect-square rounded-lg overflow-hidden border-2 transition-all disabled:opacity-50 ${
                   active ? 'border-brand-400 ring-2 ring-brand-500/40' : 'border-ink-600 hover:border-ink-400'

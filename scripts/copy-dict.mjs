@@ -5,9 +5,15 @@ import { fileURLToPath } from 'node:url';
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const src = path.join(root, 'node_modules', 'dictionary-pt');
 const dest = path.join(root, 'public', 'dictionaries', 'pt');
+const requireDict = process.env.CC_REQUIRE_DICT === '1' || process.env.CC_REQUIRE_DICT === 'true';
 
 if (!fs.existsSync(path.join(src, 'index.aff'))) {
-  console.warn('[copy-dict] dictionary-pt not installed; skip');
+  const msg = '[copy-dict] dictionary-pt not installed; skip';
+  if (requireDict) {
+    console.error(msg + ' (CC_REQUIRE_DICT=1)');
+    process.exit(1);
+  }
+  console.warn(msg);
   process.exit(0);
 }
 

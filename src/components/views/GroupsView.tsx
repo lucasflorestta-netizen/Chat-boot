@@ -91,6 +91,7 @@ export function GroupsView() {
   const [replyingTo, setReplyingTo] = useState<WhatsappGroupMessage | null>(null);
   const [showStarredOnly, setShowStarredOnly] = useState(false);
   const [showJumpLatest, setShowJumpLatest] = useState(false);
+  const [threadReady, setThreadReady] = useState(false);
   const [recentStickers, setRecentStickers] = useState<RecentSticker[]>(() =>
     loadRecentStickers(),
   );
@@ -98,18 +99,38 @@ export function GroupsView() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const selectedIdRef = useRef<string | null>(null);
   const stickToBottomRef = useRef(true);
-  const forceScrollRef = useRef(false);
+  /** Abertura do grupo: pular direto para a última mensagem (estilo WhatsApp / Conversas). */
+  const pendingInitialScrollRef = useRef(false);
   const prevMsgCountRef = useRef(0);
 
   useEffect(() => {
     selectedIdRef.current = selectedId;
   }, [selectedId]);
 
-  const scrollToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
-    bottomRef.current?.scrollIntoView({ behavior });
+  const jumpToBottomInstant = useCallback(() => {
+    const el = scrollRef.current;
+    if (el) {
+      el.scrollTop = el.scrollHeight;
+    } else {
+      bottomRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' });
+    }
     stickToBottomRef.current = true;
     setShowJumpLatest(false);
+    setThreadReady(true);
   }, []);
+
+  const scrollToBottom = useCallback(
+    (behavior: ScrollBehavior = 'smooth') => {
+      if (behavior === 'auto') {
+        jumpToBottomInstant();
+        return;
+      }
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      stickToBottomRef.current = true;
+      setShowJumpLatest(false);
+    },
+    [jumpToBottomInstant],
+  );
 
   const handleScroll = () => {
     const el = scrollRef.current;
@@ -171,14 +192,17 @@ export function GroupsView() {
       setReplyingTo(null);
       setShowStarredOnly(false);
       setShowJumpLatest(false);
+      setThreadReady(false);
+      pendingInitialScrollRef.current = false;
       prevMsgCountRef.current = 0;
       return;
     }
     setMessages([]);
     setReplyingTo(null);
     stickToBottomRef.current = true;
-    forceScrollRef.current = true;
+    pendingInitialScrollRef.current = true;
     setShowJumpLatest(false);
+    setThreadReady(false);
     prevMsgCountRef.current = 0;
     void loadMessages(selectedId);
     void api(`/whatsapp/groups/${encodeURIComponent(selectedId)}/read`, {
@@ -194,15 +218,22 @@ export function GroupsView() {
   }, [selectedId, loadMessages]);
 
   useEffect(() => {
-    const grew = messages.length > prevMsgCountRef.current;
-    prevMsgCountRef.current = messages.length;
+    if (messagesLoading) return;
 
-    if (forceScrollRef.current) {
-      forceScrollRef.current = false;
-      scrollToBottom(messagesLoading ? 'auto' : 'smooth');
+    if (pendingInitialScrollRef.current) {
+      pendingInitialScrollRef.current = false;
+      prevMsgCountRef.current = messages.length;
+      // Duplo rAF: espera o DOM pintar as bolhas antes de posicionar
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          jumpToBottomInstant();
+        });
+      });
       return;
     }
 
+    const grew = messages.length > prevMsgCountRef.current;
+    prevMsgCountRef.current = messages.length;
     if (!grew) return;
 
     if (stickToBottomRef.current) {
@@ -210,7 +241,7 @@ export function GroupsView() {
     } else {
       setShowJumpLatest(true);
     }
-  }, [messages, messagesLoading, scrollToBottom]);
+  }, [messages, messagesLoading, jumpToBottomInstant, scrollToBottom]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -339,7 +370,7 @@ export function GroupsView() {
       replyToMessageId?: string;
     }) => {
       if (!selectedId) return;
-      forceScrollRef.current = true;
+      stickToBottomRef.current = true;
       const sent = await api<WhatsappGroupMessage>(
         `/whatsapp/groups/${encodeURIComponent(selectedId)}/messages`,
         {
@@ -349,9 +380,14 @@ export function GroupsView() {
       );
       upsertMessage(sent);
       setReplyingTo(null);
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          jumpToBottomInstant();
+        });
+      });
       return sent;
     },
-    [selectedId, upsertMessage],
+    [selectedId, upsertMessage, jumpToBottomInstant],
   );
 
   const handleSendText = async (body: string) => {
@@ -417,7 +453,7 @@ export function GroupsView() {
           setError('Arquivo muito grande (máximo 50 MB)');
           continue;
         }
-        const mediaType = detectMediaType(file.type);
+        const mediaType = detectMediaType(file.type, file.name);
         try {
           await uploadAndSendMedia(file, file.name, mediaType);
         } catch {
@@ -643,7 +679,9 @@ export function GroupsView() {
             <div
               ref={scrollRef}
               onScroll={handleScroll}
-              className="h-full overflow-y-auto py-3"
+              className={`h-full overflow-y-auto py-3 ${
+                threadReady || messagesLoading ? 'opacity-100' : 'opacity-0'
+              }`}
             >
               {messagesLoading ? (
                 <div className="flex justify-center py-10">

@@ -1,10 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useTickets, useTags, useAppearanceSettings, useContacts } from '../../hooks/useData';
+import {
+  useTickets,
+  useTags,
+  useAppearanceSettings,
+  useContacts,
+  useProfiles,
+} from '../../hooks/useData';
 import { api } from '../../lib/api';
 import { mapTicket } from '../../lib/mappers';
 import { useAuth } from '../../context/useAuth';
 import type { Ticket } from '../../types';
-import { resolveWallpaper } from '../../lib/chatWallpapers';
+import { resolveWallpaper, readLocalWallpaper, writeLocalWallpaper } from '../../lib/chatWallpapers';
 import { ChatDetail } from '../chat/ChatDetail';
 import { ConversationListItem } from '../chat/ConversationListItem';
 import {
@@ -12,7 +18,6 @@ import {
   Tag as TagIcon,
   UserCog,
   X,
-  CheckCircle,
   MessageSquare,
   Inbox,
   CircleDot,
@@ -109,18 +114,37 @@ function sortByLastMessage(tickets: Ticket[]): Ticket[] {
 export function ChatView({ preselectedTicketId, onConsumePreselect, onSelectedTicketChange }: ChatViewProps) {
   const { profile } = useAuth();
   const isAdmin = profile?.role === 'admin';
-  const canEditWallpaper = profile?.apiRole === 'ADMIN';
+  const canFilterByAttendant =
+    profile?.apiRole === 'ADMIN' || profile?.apiRole === 'SUPERVISOR';
+  const canEditWallpaper = Boolean(profile?.id);
   const [search, setSearch] = useState('');
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [filterTag, setFilterTag] = useState<string | null>(null);
-  const [tab, setTab] = useState<TabFilter>('all');
+  const [filterAssigneeId, setFilterAssigneeId] = useState('');
+  const [tab, setTab] = useState<TabFilter>('mine');
+  const [localWallpaper, setLocalWallpaper] = useState(() => readLocalWallpaper());
 
-  const { tickets, loading } = useTickets();
+  const { tickets, loading, loadingMore, hasMoreFinished, loadMoreFinished } = useTickets();
   const { contacts } = useContacts();
   const { tags, refetch: refetchTags } = useTags();
+  const { profiles } = useProfiles();
   const { settings: appearance, saving: wallpaperSaving, update: updateAppearance } =
     useAppearanceSettings();
   const photoRefreshAttempted = useRef<Set<string>>(new Set());
+
+  const attendantOptions = useMemo(() => {
+    if (!canFilterByAttendant) return [];
+    return profiles
+      .filter(
+        (p) =>
+          p.is_active &&
+          ['OPERATOR', 'ADMIN', 'SUPERVISOR'].includes(
+            String(p.apiRole ?? '').toUpperCase(),
+          ),
+      )
+      .slice()
+      .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+  }, [profiles, canFilterByAttendant]);
 
   /** Mesma fonte de foto/nome da Agenda de Contatos. */
   const ticketsWithAgenda = useMemo(() => {
@@ -148,18 +172,43 @@ export function ChatView({ preselectedTicketId, onConsumePreselect, onSelectedTi
     }
   }, [isAdmin, tab]);
 
-  const wallpaperKey = appearance?.wallpaperKey ?? 'linen';
-  const customImageUrl = appearance?.customImageUrl ?? null;
+  const wallpaperKey =
+    localWallpaper?.wallpaperKey ?? appearance?.wallpaperKey ?? 'linen';
+  const customImageUrl =
+    localWallpaper?.customImageUrl ?? appearance?.customImageUrl ?? null;
   const wallpaper = resolveWallpaper(wallpaperKey, customImageUrl);
 
-  const handleWallpaperChange = (id: string) => {
+  const handleWallpaperChange = async (id: string) => {
     if (!canEditWallpaper) return;
-    void updateAppearance({ wallpaperKey: id, customImageUrl: null });
+    const pref = { wallpaperKey: id, customImageUrl: null as string | null };
+    writeLocalWallpaper(pref);
+    setLocalWallpaper(pref);
+    // Admin também grava o padrão global (novos usuários)
+    if (profile?.apiRole === 'ADMIN') {
+      try {
+        await updateAppearance({ wallpaperKey: id, customImageUrl: null });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Falha ao salvar papel de parede';
+        alert(msg);
+        throw err;
+      }
+    }
   };
 
-  const handleCustomWallpaper = (url: string) => {
+  const handleCustomWallpaper = async (url: string) => {
     if (!canEditWallpaper) return;
-    void updateAppearance({ wallpaperKey: 'custom', customImageUrl: url });
+    const pref = { wallpaperKey: 'custom', customImageUrl: url };
+    writeLocalWallpaper(pref);
+    setLocalWallpaper(pref);
+    if (profile?.apiRole === 'ADMIN') {
+      try {
+        await updateAppearance({ wallpaperKey: 'custom', customImageUrl: url });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Falha ao salvar papel de parede';
+        alert(msg);
+        throw err;
+      }
+    }
   };
 
   const deptFiltered = useMemo(() => {
@@ -178,6 +227,13 @@ export function ChatView({ preselectedTicketId, onConsumePreselect, onSelectedTi
   /** Lista principal estilo WA Tudo — 1 contato, todos os status. */
   const todosList = useMemo(() => dedupeByContact(deptFiltered), [deptFiltered]);
 
+  /** Finalizados — 1 card por contato (mesmo dedupe de Todos). */
+  const finishedList = useMemo(
+    () =>
+      dedupeByContact(deptFiltered.filter((t) => t.status === 'finished')),
+    [deptFiltered],
+  );
+
   /** Clientes aguardando atendimento (sem responsável). */
   const triageTickets = useMemo(
     () =>
@@ -191,14 +247,15 @@ export function ChatView({ preselectedTicketId, onConsumePreselect, onSelectedTi
     switch (tab) {
       case 'triage':
         return triageTickets;
-      case 'attending':
-        return sortByLastMessage(
-          deptFiltered.filter((t) => t.status === 'attending'),
-        );
+      case 'attending': {
+        let attending = deptFiltered.filter((t) => t.status === 'attending');
+        if (canFilterByAttendant && filterAssigneeId) {
+          attending = attending.filter((t) => t.assigned_to === filterAssigneeId);
+        }
+        return sortByLastMessage(attending);
+      }
       case 'finished':
-        return sortByLastMessage(
-          deptFiltered.filter((t) => t.status === 'finished'),
-        );
+        return finishedList;
       case 'mine':
         return sortByLastMessage(
           deptFiltered.filter(
@@ -212,15 +269,26 @@ export function ChatView({ preselectedTicketId, onConsumePreselect, onSelectedTi
       default:
         return todosList;
     }
-  }, [deptFiltered, triageTickets, todosList, tab, profile]);
+  }, [
+    deptFiltered,
+    triageTickets,
+    todosList,
+    finishedList,
+    tab,
+    profile,
+    canFilterByAttendant,
+    filterAssigneeId,
+  ]);
 
   const searched = useMemo(() => {
     let result = tabFiltered;
     if (search) {
+      const q = search.toLowerCase().trim();
       result = result.filter(
         (t) =>
-          t.contact?.name?.toLowerCase().includes(search.toLowerCase()) ||
-          t.contact?.phone?.includes(search),
+          t.contact?.name?.toLowerCase().includes(q) ||
+          t.contact?.phone?.includes(search) ||
+          t.protocolo?.toLowerCase().includes(q),
       );
     }
     if (filterTag) {
@@ -229,11 +297,18 @@ export function ChatView({ preselectedTicketId, onConsumePreselect, onSelectedTi
     return result;
   }, [tabFiltered, search, filterTag]);
 
-  // Igual Agenda: sem foto local, pede refresh uma vez por contato (lista visível).
+  // Sem foto local (/uploads/), pede refresh (CDN ou vazio).
   useEffect(() => {
+    const needsRefresh = (url: string | null | undefined) => {
+      if (!url) return true;
+      return !url.includes('/uploads/');
+    };
     const missing = searched
       .map((t) => t.contact)
-      .filter((c): c is NonNullable<typeof c> => !!c?.id && !c.profile_pic_url)
+      .filter(
+        (c): c is NonNullable<typeof c> =>
+          !!c?.id && needsRefresh(c.profile_pic_url),
+      )
       .filter((c) => !photoRefreshAttempted.current.has(c.id));
 
     // Limita rajada (Baileys é serial no backend).
@@ -348,37 +423,50 @@ export function ChatView({ preselectedTicketId, onConsumePreselect, onSelectedTi
     await api(`/tickets/${ticket.id}/transfer/cancel`, { method: 'PATCH' });
   };
 
-  const tabConfig: { id: TabFilter; label: string; count: number; icon: React.ReactNode }[] = [
+  const attendingCount = deptFiltered.filter((t) => t.status === 'attending').length;
+  const mineCount = deptFiltered.filter(
+    (t) => t.assigned_to === profile?.id && t.status !== 'finished',
+  ).length;
+
+  const tabConfig: {
+    id: TabFilter;
+    label: string;
+    count: number | null;
+    icon: React.ReactNode;
+    accent: string;
+    accentMuted: string;
+  }[] = [
     {
-      id: 'all',
-      label: 'Todos',
-      count: todosList.length,
-      icon: <Inbox className="w-3.5 h-3.5" />,
+      id: 'mine',
+      label: 'Meus',
+      count: mineCount,
+      icon: <UserCog className="w-3.5 h-3.5" />,
+      accent: 'text-success-500',
+      accentMuted: 'text-success-500/80',
+    },
+    {
+      id: 'attending',
+      label: 'Atendimento',
+      count: attendingCount,
+      icon: <MessageSquare className="w-3.5 h-3.5" />,
+      accent: 'text-brand-300',
+      accentMuted: 'text-brand-400/80',
     },
     {
       id: 'triage',
       label: 'Triagem',
       count: triageTickets.length,
       icon: <CircleDot className="w-3.5 h-3.5" />,
+      accent: 'text-warning-400',
+      accentMuted: 'text-warning-400/80',
     },
     {
-      id: 'attending',
-      label: 'Em Atendimento',
-      count: deptFiltered.filter((t) => t.status === 'attending').length,
-      icon: <MessageSquare className="w-3.5 h-3.5" />,
-    },
-    {
-      id: 'mine',
-      label: 'Meus',
-      count: deptFiltered.filter((t) => t.assigned_to === profile?.id && t.status !== 'finished')
-        .length,
-      icon: <UserCog className="w-3.5 h-3.5" />,
-    },
-    {
-      id: 'finished',
-      label: 'Finalizados',
-      count: deptFiltered.filter((t) => t.status === 'finished').length,
-      icon: <CheckCircle className="w-3.5 h-3.5" />,
+      id: 'all',
+      label: 'Todos',
+      count: null,
+      icon: <Inbox className="w-3.5 h-3.5" />,
+      accent: 'text-ink-100',
+      accentMuted: 'text-ink-300',
     },
   ];
 
@@ -386,7 +474,7 @@ export function ChatView({ preselectedTicketId, onConsumePreselect, onSelectedTi
     ? tabConfig
     : tabConfig.filter((t) => t.id === 'triage' || t.id === 'mine');
 
-  if (loading) {
+  if (loading && tickets.length === 0) {
     return (
       <div className="flex items-center justify-center h-full">
         <div className="w-8 h-8 border-2 border-brand-500 border-t-transparent rounded-full animate-spin" />
@@ -405,7 +493,7 @@ export function ChatView({ preselectedTicketId, onConsumePreselect, onSelectedTi
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Buscar conversa..."
+              placeholder="Buscar conversa ou protocolo..."
               className="input pl-9 text-sm"
             />
           </div>
@@ -421,48 +509,117 @@ export function ChatView({ preselectedTicketId, onConsumePreselect, onSelectedTi
           )}
         </div>
 
-        <div className="flex gap-0.5 p-1.5 border-b border-ink-700 overflow-x-auto">
-          {visibleTabs.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
-              className={`flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium transition-all whitespace-nowrap ${
-                tab === t.id
-                  ? 'bg-brand-600 text-white'
-                  : 'text-ink-300 hover:bg-ink-700 hover:text-white'
-              }`}
-            >
-              {t.icon}
-              {t.label}
-              {t.count > 0 && (
+        <div className="grid grid-cols-2 gap-1.5 p-2 border-b border-ink-700">
+          {visibleTabs.map((t) => {
+            const active = tab === t.id;
+            const triageHot = t.id === 'triage' && (t.count ?? 0) > 0 && !active;
+            return (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => setTab(t.id)}
+                title={t.id === 'attending' ? 'Em Atendimento' : t.label}
+                className={`flex flex-col items-start gap-1 px-2.5 py-2 rounded-lg text-left transition-all ${
+                  t.count == null ? 'justify-center min-h-[52px]' : ''
+                } ${
+                  active
+                    ? 'bg-brand-600 text-white ring-1 ring-brand-400/80 shadow-sm shadow-brand-900/30'
+                    : triageHot
+                      ? 'bg-warning-500/10 text-ink-100 border border-warning-500/40 hover:bg-warning-500/15'
+                      : 'bg-ink-800/80 text-ink-200 border border-ink-700 hover:bg-ink-700 hover:border-ink-600'
+                }`}
+              >
                 <span
-                  className={`text-[10px] px-1 rounded-full ${
-                    tab === t.id ? 'bg-white/20' : 'bg-ink-700'
+                  className={`flex items-center gap-1.5 text-[11px] font-semibold leading-none ${
+                    active ? 'text-white/90' : t.accentMuted
                   }`}
                 >
-                  {t.count}
+                  {t.icon}
+                  {t.label}
                 </span>
-              )}
-            </button>
-          ))}
+                {t.count != null && (
+                  <span
+                    className={`text-lg font-bold tabular-nums leading-none ${
+                      active ? 'text-white' : t.accent
+                    }`}
+                  >
+                    {t.count}
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
 
-        <div className="flex-1 overflow-y-auto">
+        {tab === 'attending' && canFilterByAttendant && (
+          <div className="px-3 py-2 border-b border-ink-700">
+            <select
+              id="filter-assignee"
+              aria-label="Filtrar por atendente"
+              className="input text-sm w-full"
+              value={filterAssigneeId}
+              onChange={(e) => setFilterAssigneeId(e.target.value)}
+            >
+              <option value="">Todos os atendentes</option>
+              {attendantOptions.map((agent) => {
+                const count = deptFiltered.filter(
+                  (t) => t.status === 'attending' && t.assigned_to === agent.id,
+                ).length;
+                return (
+                  <option key={agent.id} value={agent.id}>
+                    {agent.name}
+                    {count > 0 ? ` (${count})` : ''}
+                  </option>
+                );
+              })}
+            </select>
+          </div>
+        )}
+
+        <div
+          className="flex-1 overflow-y-auto"
+          onScroll={(e) => {
+            if (!hasMoreFinished || loadingMore) return;
+            // Todos e Finalizados dependem do histórico fechado paginado.
+            if (tab !== 'all' && tab !== 'finished') return;
+            const el = e.currentTarget;
+            const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 240;
+            if (nearBottom) {
+              void loadMoreFinished();
+            }
+          }}
+        >
           {searched.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 text-ink-300">
               <MessageSquare className="w-10 h-10 mb-2 opacity-20" />
               <p className="text-xs">Nenhuma conversa encontrada</p>
             </div>
           ) : (
-            searched.map((ticket) => (
-              <ConversationListItem
-                key={ticket.id}
-                ticket={ticket}
-                isSelected={selectedTicket?.id === ticket.id}
-                onClick={() => handleSelectTicket(ticket)}
-                onTagClick={(tagId) => setFilterTag(tagId)}
-              />
-            ))
+            <>
+              {searched.map((ticket) => (
+                <ConversationListItem
+                  key={ticket.id}
+                  ticket={ticket}
+                  isSelected={selectedTicket?.id === ticket.id}
+                  onClick={() => handleSelectTicket(ticket)}
+                  onTagClick={(tagId) => setFilterTag(tagId)}
+                  onPhotoError={(contactId) => {
+                    if (photoRefreshAttempted.current.has(`err:${contactId}`)) return;
+                    photoRefreshAttempted.current.add(`err:${contactId}`);
+                    void api(`/whatsapp/contacts/${contactId}/refresh-photo`, {
+                      method: 'POST',
+                    }).catch(() => {
+                      /* silencioso */
+                    });
+                  }}
+                />
+              ))}
+              {(tab === 'all' || tab === 'finished') && (loadingMore || hasMoreFinished) && (
+                <div className="py-3 text-center text-[11px] text-ink-400">
+                  {loadingMore ? 'Carregando mais…' : 'Role para carregar mais'}
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
