@@ -27,7 +27,7 @@ const DEFAULT_MENU_INTRO = 'Digite o número do setor:';
 
 const TIME_OPTIONS: string[] = [];
 for (let h = 0; h < 24; h++) {
-  for (const m of [0, 30]) {
+  for (const m of [0, 15, 30, 45]) {
     TIME_OPTIONS.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
   }
 }
@@ -392,7 +392,7 @@ export function AutoMessagesView() {
 
           <SettingCard
             icon={<UserCheck className="w-4 h-4" />}
-            title="Mensagem de Ausência (Identificada)"
+            title="Mensagem ao Assumir Atendimento"
           >
             <textarea
               value={form.takeover_message}
@@ -438,7 +438,7 @@ export function AutoMessagesView() {
             />
           </SettingCard>
 
-          {/* Linha 3 */}
+          {/* Linha 3 — Protocolo + NPS + Offline */}
           <SettingCard
             icon={<Hash className="w-4 h-4" />}
             title="Barra de Protocolo"
@@ -455,92 +455,6 @@ export function AutoMessagesView() {
             </p>
           </SettingCard>
 
-          <SettingCard
-            icon={<Clock className="w-4 h-4" />}
-            title="Inatividade no cliente"
-            className="col-span-2"
-            headerRight={
-              <ToggleSwitch
-                checked={form.inactivity_enabled}
-                onChange={() =>
-                  setForm({ ...form, inactivity_enabled: !form.inactivity_enabled })
-                }
-                ariaLabel="Inatividade no cliente"
-              />
-            }
-          >
-            <div
-              className={`grid grid-cols-2 gap-3 ${
-                form.inactivity_enabled ? '' : 'pointer-events-none opacity-50'
-              }`}
-            >
-              <div className="space-y-1.5">
-                <div>
-                  <label className="mb-0.5 block text-[11px] text-ink-200">Mensagem de aviso</label>
-                  <textarea
-                    value={form.inactivity_warning_message}
-                    onChange={(e) =>
-                      setForm({ ...form, inactivity_warning_message: e.target.value })
-                    }
-                    className="input h-10 resize-none !py-1.5 text-xs"
-                    disabled={!form.inactivity_enabled}
-                    placeholder="Ainda está aí? Não tivemos retorno, em breve o atendimento será encerrado."
-                  />
-                </div>
-                <div>
-                  <label className="mb-0.5 block text-[11px] text-ink-200">Tempo para aviso</label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={1440}
-                    value={form.inactivity_warning_minutes}
-                    onChange={(e) =>
-                      setForm({
-                        ...form,
-                        inactivity_warning_minutes: Number(e.target.value),
-                      })
-                    }
-                    className="input !py-1 text-xs h-8"
-                    disabled={!form.inactivity_enabled}
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <div>
-                  <label className="mb-0.5 block text-[11px] text-ink-200">Mensagem de encerramento</label>
-                  <textarea
-                    value={form.inactivity_closing_message}
-                    onChange={(e) =>
-                      setForm({ ...form, inactivity_closing_message: e.target.value })
-                    }
-                    className="input h-10 resize-none !py-1.5 text-xs"
-                    disabled={!form.inactivity_enabled}
-                    placeholder="Encerramos seu atendimento por inatividade. Obrigado!"
-                  />
-                </div>
-                <div>
-                  <label className="mb-0.5 block text-[11px] text-ink-200">Tempo para encerrar</label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={1440}
-                    value={form.inactivity_closing_minutes}
-                    onChange={(e) =>
-                      setForm({
-                        ...form,
-                        inactivity_closing_minutes: Number(e.target.value),
-                      })
-                    }
-                    className="input !py-1 text-xs h-8"
-                    disabled={!form.inactivity_enabled}
-                  />
-                </div>
-              </div>
-            </div>
-          </SettingCard>
-
-          {/* Linha 4 — NPS compacto */}
           <SettingCard
             icon={<Star className="w-4 h-4" />}
             title="Pesquisa de Satisfação (NPS)"
@@ -579,20 +493,101 @@ export function AutoMessagesView() {
           >
             <p className="text-[10px] text-ink-300 leading-tight">
               Só com o agente logado: 5 min antes do almoço fica offline; no horário exato do
-              fim do expediente (workEnd) também. Volta a Disponível ao terminar o almoço ou
-              no início do próximo expediente se ainda estiver logado. Atendimentos já
-              atribuídos permanecem.
+              fim do expediente (workEnd) também. Ao terminar o almoço ou no início do
+              expediente, a tela pede confirmação — só então volta a Disponível e recebe
+              fila. Atendimentos já atribuídos permanecem.
             </p>
           </SettingCard>
-        </div>
 
-        {/* Horário comercial — full width */}
-        <SettingCard
-          icon={<Clock className="w-4 h-4" />}
-          title="Horário comercial"
-          headerRight={
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] text-ink-300 whitespace-nowrap">Ativar</span>
+          {/* Linha 4 — Inatividade (1 coluna) */}
+          <SettingCard
+            icon={<Clock className="w-4 h-4" />}
+            title="Inatividade no cliente"
+            compact
+            headerRight={
+              <ToggleSwitch
+                checked={form.inactivity_enabled}
+                onChange={() =>
+                  setForm({ ...form, inactivity_enabled: !form.inactivity_enabled })
+                }
+                ariaLabel="Inatividade no cliente"
+              />
+            }
+          >
+            <div
+              className={`space-y-1.5 ${
+                form.inactivity_enabled ? '' : 'pointer-events-none opacity-50'
+              }`}
+            >
+              <div>
+                <label className="mb-0.5 block text-[11px] text-ink-200">Mensagem de aviso</label>
+                <textarea
+                  value={form.inactivity_warning_message}
+                  onChange={(e) =>
+                    setForm({ ...form, inactivity_warning_message: e.target.value })
+                  }
+                  className="input h-8 resize-none !py-1 text-xs"
+                  disabled={!form.inactivity_enabled}
+                  placeholder="Ainda está aí? Não tivemos retorno, em breve o atendimento será encerrado."
+                />
+              </div>
+              <div>
+                <label className="mb-0.5 block text-[11px] text-ink-200">Mensagem de encerramento</label>
+                <textarea
+                  value={form.inactivity_closing_message}
+                  onChange={(e) =>
+                    setForm({ ...form, inactivity_closing_message: e.target.value })
+                  }
+                  className="input h-8 resize-none !py-1 text-xs"
+                  disabled={!form.inactivity_enabled}
+                  placeholder="Encerramos seu atendimento por inatividade. Obrigado!"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="mb-0.5 block text-[11px] text-ink-200">Aviso (min)</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={1440}
+                    value={form.inactivity_warning_minutes}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        inactivity_warning_minutes: Number(e.target.value),
+                      })
+                    }
+                    className="input !py-1 text-xs h-8"
+                    disabled={!form.inactivity_enabled}
+                  />
+                </div>
+                <div>
+                  <label className="mb-0.5 block text-[11px] text-ink-200">Encerrar (min)</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={1440}
+                    value={form.inactivity_closing_minutes}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        inactivity_closing_minutes: Number(e.target.value),
+                      })
+                    }
+                    className="input !py-1 text-xs h-8"
+                    disabled={!form.inactivity_enabled}
+                  />
+                </div>
+              </div>
+            </div>
+          </SettingCard>
+
+          {/* Linha 4 — Horário comercial (1 coluna) */}
+          <SettingCard
+            icon={<Clock className="w-4 h-4" />}
+            title="Horário comercial"
+            compact
+            headerRight={
               <ToggleSwitch
                 checked={form.business_hours_enabled}
                 onChange={() =>
@@ -603,189 +598,182 @@ export function AutoMessagesView() {
                 }
                 ariaLabel="Ativar horário comercial"
               />
-            </div>
-          }
-        >
-          <p className="mb-2 text-[10px] text-ink-300 leading-tight">
-            Horário de Brasília (America/Sao_Paulo). Dias úteis, sábado e domingo podem ter
-            horários diferentes. Fora do expediente envia a Mensagem de Fim de Expediente.
-          </p>
+            }
+          >
+            <p className="mb-1.5 text-[10px] text-ink-300 leading-tight">
+              Brasília. Fora do expediente envia Fim de Expediente.
+            </p>
 
-          {form.business_hours_enabled && (
-            <div className="space-y-3">
-              <div>
-                <label className="mb-0.5 block text-[11px] text-ink-200">Dias úteis</label>
-                <div className="mt-1 flex flex-wrap gap-1.5">
-                  {WEEKDAY_OPTIONS.map(({ value, label }) => {
-                    const active = (form.business_days ?? []).includes(value);
-                    return (
-                      <button
-                        key={value}
-                        type="button"
-                        onClick={() => toggleDay(value)}
-                        aria-pressed={active}
-                        className={`min-w-[2.5rem] rounded-md px-2 py-1 text-[11px] font-medium transition-colors ${
-                          active
-                            ? 'bg-brand-500 text-white'
-                            : 'bg-ink-700 text-ink-200 hover:bg-ink-600 hover:text-white'
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    );
-                  })}
+            {form.business_hours_enabled && (
+              <div className="space-y-1.5">
+                <div>
+                  <label className="mb-0.5 block text-[11px] text-ink-200">Dias úteis</label>
+                  <div className="mt-0.5 flex flex-wrap gap-1">
+                    {WEEKDAY_OPTIONS.map(({ value, label }) => {
+                      const active = (form.business_days ?? []).includes(value);
+                      return (
+                        <button
+                          key={value}
+                          type="button"
+                          onClick={() => toggleDay(value)}
+                          aria-pressed={active}
+                          className={`min-w-[2rem] rounded-md px-1.5 py-0.5 text-[10px] font-medium transition-colors ${
+                            active
+                              ? 'bg-brand-500 text-white'
+                              : 'bg-ink-700 text-ink-200 hover:bg-ink-600 hover:text-white'
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
 
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                <TimeSelect
-                  label="Início (dias úteis)"
-                  value={form.business_hours_start}
-                  onChange={(business_hours_start) =>
-                    setForm({ ...form, business_hours_start })
-                  }
-                />
-                <TimeSelect
-                  label="Fim (dias úteis)"
-                  value={form.business_hours_end}
-                  onChange={(business_hours_end) =>
-                    setForm({ ...form, business_hours_end })
-                  }
-                />
-              </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <TimeSelect
+                    label="Início"
+                    value={form.business_hours_start}
+                    onChange={(business_hours_start) =>
+                      setForm({ ...form, business_hours_start })
+                    }
+                  />
+                  <TimeSelect
+                    label="Fim"
+                    value={form.business_hours_end}
+                    onChange={(business_hours_end) =>
+                      setForm({ ...form, business_hours_end })
+                    }
+                  />
+                </div>
 
-              <div className="flex flex-wrap gap-1.5">
-                <button
-                  type="button"
-                  onClick={() =>
-                    setForm({
-                      ...form,
-                      business_hours_start: '08:00',
-                      business_hours_end: '18:00',
-                    })
-                  }
-                  className="text-[11px] px-2 py-1 rounded-md bg-ink-700 text-ink-200 hover:bg-ink-600 hover:text-white transition-colors"
-                >
-                  08h–18h
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setForm({
-                      ...form,
-                      business_hours_start: '09:00',
-                      business_hours_end: '18:00',
-                    })
-                  }
-                  className="text-[11px] px-2 py-1 rounded-md bg-ink-700 text-ink-200 hover:bg-ink-600 hover:text-white transition-colors"
-                >
-                  09h–18h
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setForm({
-                      ...form,
-                      business_hours_start: '08:00',
-                      business_hours_end: '17:00',
-                    })
-                  }
-                  className="text-[11px] px-2 py-1 rounded-md bg-ink-700 text-ink-200 hover:bg-ink-600 hover:text-white transition-colors"
-                >
-                  08h–17h
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setForm({
-                      ...form,
-                      business_days: [1, 2, 3, 4, 5],
-                    })
-                  }
-                  className="text-[11px] px-2 py-1 rounded-md bg-ink-700 text-ink-200 hover:bg-ink-600 hover:text-white transition-colors"
-                >
-                  Seg–Sex
-                </button>
-              </div>
+                <div className="flex flex-wrap gap-1">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setForm({
+                        ...form,
+                        business_hours_start: '08:00',
+                        business_hours_end: '18:00',
+                      })
+                    }
+                    className="text-[10px] px-1.5 py-0.5 rounded-md bg-ink-700 text-ink-200 hover:bg-ink-600 hover:text-white transition-colors"
+                  >
+                    08h–18h
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setForm({
+                        ...form,
+                        business_hours_start: '09:00',
+                        business_hours_end: '18:00',
+                      })
+                    }
+                    className="text-[10px] px-1.5 py-0.5 rounded-md bg-ink-700 text-ink-200 hover:bg-ink-600 hover:text-white transition-colors"
+                  >
+                    09h–18h
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setForm({
+                        ...form,
+                        business_hours_start: '08:00',
+                        business_hours_end: '17:00',
+                      })
+                    }
+                    className="text-[10px] px-1.5 py-0.5 rounded-md bg-ink-700 text-ink-200 hover:bg-ink-600 hover:text-white transition-colors"
+                  >
+                    08h–17h
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setForm({
+                        ...form,
+                        business_days: [1, 2, 3, 4, 5],
+                      })
+                    }
+                    className="text-[10px] px-1.5 py-0.5 rounded-md bg-ink-700 text-ink-200 hover:bg-ink-600 hover:text-white transition-colors"
+                  >
+                    Seg–Sex
+                  </button>
+                </div>
 
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div className="space-y-2 rounded-md border border-ink-700/80 bg-ink-800/40 p-2.5">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
+                <div className="space-y-1.5">
+                  <div className="space-y-1.5 rounded-md border border-ink-700/80 bg-ink-800/40 p-1.5">
+                    <div className="flex items-center justify-between gap-2">
                       <p className="text-xs font-medium text-white">Sábado</p>
-                      <p className="text-[10px] text-ink-300">Horário separado dos dias úteis</p>
+                      <ToggleSwitch
+                        checked={form.saturday_hours_enabled}
+                        onChange={() =>
+                          setForm({
+                            ...form,
+                            saturday_hours_enabled: !form.saturday_hours_enabled,
+                          })
+                        }
+                        ariaLabel="Atender no sábado"
+                      />
                     </div>
-                    <ToggleSwitch
-                      checked={form.saturday_hours_enabled}
-                      onChange={() =>
-                        setForm({
-                          ...form,
-                          saturday_hours_enabled: !form.saturday_hours_enabled,
-                        })
-                      }
-                      ariaLabel="Atender no sábado"
-                    />
+                    {form.saturday_hours_enabled && (
+                      <div className="grid grid-cols-2 gap-2">
+                        <TimeSelect
+                          label="Início"
+                          value={form.saturday_hours_start}
+                          onChange={(saturday_hours_start) =>
+                            setForm({ ...form, saturday_hours_start })
+                          }
+                        />
+                        <TimeSelect
+                          label="Fim"
+                          value={form.saturday_hours_end}
+                          onChange={(saturday_hours_end) =>
+                            setForm({ ...form, saturday_hours_end })
+                          }
+                        />
+                      </div>
+                    )}
                   </div>
-                  {form.saturday_hours_enabled && (
-                    <div className="grid grid-cols-2 gap-2">
-                      <TimeSelect
-                        label="Início"
-                        value={form.saturday_hours_start}
-                        onChange={(saturday_hours_start) =>
-                          setForm({ ...form, saturday_hours_start })
-                        }
-                      />
-                      <TimeSelect
-                        label="Fim"
-                        value={form.saturday_hours_end}
-                        onChange={(saturday_hours_end) =>
-                          setForm({ ...form, saturday_hours_end })
-                        }
-                      />
-                    </div>
-                  )}
-                </div>
 
-                <div className="space-y-2 rounded-md border border-ink-700/80 bg-ink-800/40 p-2.5">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
+                  <div className="space-y-1.5 rounded-md border border-ink-700/80 bg-ink-800/40 p-1.5">
+                    <div className="flex items-center justify-between gap-2">
                       <p className="text-xs font-medium text-white">Domingo</p>
-                      <p className="text-[10px] text-ink-300">Horário separado dos dias úteis</p>
+                      <ToggleSwitch
+                        checked={form.sunday_hours_enabled}
+                        onChange={() =>
+                          setForm({
+                            ...form,
+                            sunday_hours_enabled: !form.sunday_hours_enabled,
+                          })
+                        }
+                        ariaLabel="Atender no domingo"
+                      />
                     </div>
-                    <ToggleSwitch
-                      checked={form.sunday_hours_enabled}
-                      onChange={() =>
-                        setForm({
-                          ...form,
-                          sunday_hours_enabled: !form.sunday_hours_enabled,
-                        })
-                      }
-                      ariaLabel="Atender no domingo"
-                    />
+                    {form.sunday_hours_enabled && (
+                      <div className="grid grid-cols-2 gap-2">
+                        <TimeSelect
+                          label="Início"
+                          value={form.sunday_hours_start}
+                          onChange={(sunday_hours_start) =>
+                            setForm({ ...form, sunday_hours_start })
+                          }
+                        />
+                        <TimeSelect
+                          label="Fim"
+                          value={form.sunday_hours_end}
+                          onChange={(sunday_hours_end) =>
+                            setForm({ ...form, sunday_hours_end })
+                          }
+                        />
+                      </div>
+                    )}
                   </div>
-                  {form.sunday_hours_enabled && (
-                    <div className="grid grid-cols-2 gap-2">
-                      <TimeSelect
-                        label="Início"
-                        value={form.sunday_hours_start}
-                        onChange={(sunday_hours_start) =>
-                          setForm({ ...form, sunday_hours_start })
-                        }
-                      />
-                      <TimeSelect
-                        label="Fim"
-                        value={form.sunday_hours_end}
-                        onChange={(sunday_hours_end) =>
-                          setForm({ ...form, sunday_hours_end })
-                        }
-                      />
-                    </div>
-                  )}
                 </div>
               </div>
-            </div>
-          )}
-        </SettingCard>
+            )}
+          </SettingCard>
+        </div>
       </div>
     </div>
   );

@@ -15,12 +15,24 @@ import { TagsView } from './components/views/TagsView';
 import { CannedView } from './components/views/CannedView';
 import { InternalChatView } from './components/views/InternalChatView';
 import { GroupsView } from './components/views/GroupsView';
+import { MuralView } from './components/views/MuralView';
 import { useNotifications } from './hooks/useNotifications';
 import { useTickets } from './hooks/useData';
 import { api } from './lib/api';
+import {
+  fireMuralReminder,
+  notifyMuralAssigned,
+  scheduleMuralReminder,
+  setMuralReminderHandler,
+} from './lib/muralReminders';
 import { connectSocket } from './lib/socket';
-import { mapMediaType, mapTicket } from './lib/mappers';
+import { mapMediaType, mapProfile, mapTicket } from './lib/mappers';
 import { TransferAcceptModal } from './components/chat/TransferAcceptModal';
+import {
+  MuralReminderModal,
+  type MuralReminderPopup,
+} from './components/mural/MuralReminderModal';
+import { LunchReturnModal } from './components/LunchReturnModal';
 import { ContactAvatar } from './components/ContactAvatar';
 import type { Ticket } from './types';
 import { AlertCircle, Loader2, WifiOff } from 'lucide-react';
@@ -119,14 +131,20 @@ function LoginSessionBanner() {
 }
 
 function AuthenticatedApp() {
-  const { profile } = useAuth();
+  const { profile, patchProfile } = useAuth();
   const { connection, loading: waLoading } = useWhatsappConnection();
   const [activeTab, setActiveTab] = useState<TabId>('chat');
   const [preselectedTicket, setPreselectedTicket] = useState<string | null>(null);
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
   const [internalUnread, setInternalUnread] = useState(0);
+  const [muralUnread, setMuralUnread] = useState(0);
   const [pendingTransfer, setPendingTransfer] = useState<Ticket | null>(null);
   const [transferBusy, setTransferBusy] = useState(false);
+  const [lunchReturnConfirming, setLunchReturnConfirming] = useState(false);
+  const [muralDuePopup, setMuralDuePopup] = useState<MuralReminderPopup | null>(
+    null,
+  );
+  const muralDueQueueRef = useRef<MuralReminderPopup[]>([]);
   const selectedTicketIdRef = useRef<string | null>(null);
   const activeTabRef = useRef<TabId>('chat');
   const { notifications, notify, dismiss, soundEnabled, setSoundEnabled } = useNotifications();
@@ -154,10 +172,20 @@ function AuthenticatedApp() {
     }
   }, []);
 
+  const refreshMuralBadge = useCallback(async () => {
+    try {
+      const data = await api<{ unreadReminders: number }>('/mural/reminders/badge');
+      setMuralUnread(data.unreadReminders ?? 0);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
   useEffect(() => {
     if (!profile) return;
     void refreshInternalUnread();
-  }, [profile, refreshInternalUnread]);
+    void refreshMuralBadge();
+  }, [profile, refreshInternalUnread, refreshMuralBadge]);
 
   useEffect(() => {
     if (!profile) return;
@@ -316,19 +344,181 @@ function AuthenticatedApp() {
       void refreshInternalUnread();
     };
 
+    // Lembrete no horário → popup modal (não só toast).
+    setMuralReminderHandler((payload) => {
+      void refreshMuralBadge();
+      const popup: MuralReminderPopup = {
+        taskId: payload.taskId,
+        ticketId: payload.ticketId,
+        body: payload.body,
+        contactName: payload.contactName,
+        avatarUrl: payload.avatarUrl,
+        title: payload.title ?? 'Lembrete do Mural',
+        dueAt: payload.dueAt ?? new Date().toISOString(),
+      };
+      notify(
+        'ticket',
+        popup.title ?? 'Lembrete do Mural',
+        popup.body?.trim() || 'Lembrete de tarefa',
+        {
+          avatarUrl: popup.avatarUrl,
+          ticketId: popup.ticketId,
+          label: 'Mural',
+          toast: false,
+        },
+      );
+      setMuralDuePopup((current) => {
+        if (!current) return popup;
+        if (current.taskId === popup.taskId) return popup;
+        muralDueQueueRef.current = [
+          ...muralDueQueueRef.current.filter((q) => q.taskId !== popup.taskId),
+          popup,
+        ];
+        return current;
+      });
+    });
+
+    const onMuralReminder = (payload: {
+      taskId?: string;
+      ticketId?: string;
+      body?: string;
+      contactName?: string | null;
+      avatarUrl?: string | null;
+      dueAt?: string | Date;
+    }) => {
+      if (!payload.taskId) {
+        void refreshMuralBadge();
+        setMuralDuePopup({
+          taskId: `anon-${Date.now()}`,
+          ticketId: payload.ticketId,
+          body: payload.body,
+          contactName: payload.contactName,
+          avatarUrl: payload.avatarUrl,
+          title: 'Lembrete do Mural',
+          dueAt: payload.dueAt ?? new Date().toISOString(),
+        });
+        return;
+      }
+      fireMuralReminder({
+        taskId: payload.taskId,
+        ticketId: payload.ticketId,
+        body: payload.body,
+        contactName: payload.contactName,
+        avatarUrl: payload.avatarUrl,
+        title: 'Lembrete do Mural',
+        dueAt: payload.dueAt ?? new Date().toISOString(),
+      });
+    };
+
+    const onMuralTaskCreated = (payload: {
+      task?: {
+        id?: string;
+        assignedToId?: string;
+        createdById?: string;
+        ticketId?: string;
+        conversaId?: string;
+        dueAt?: string | Date;
+        body?: string | null;
+        clienteNome?: string | null;
+        cliente_nome?: string | null;
+        createdBy?: { name?: string | null; username?: string };
+        created_by?: { name?: string | null; username?: string };
+        ticket?: {
+          protocolo?: string | null;
+          contact?: {
+            displayName?: string | null;
+            profilePicUrl?: string | null;
+          };
+        };
+      };
+    }) => {
+      const task = payload?.task;
+      if (!task?.id) return;
+      // Só o responsável vinculado recebe a notificação na tela principal.
+      if (task.assignedToId !== profile.id) return;
+
+      const contactName =
+        task.ticket?.contact?.displayName?.trim() ||
+        task.clienteNome?.trim() ||
+        task.cliente_nome?.trim() ||
+        'Cliente';
+      const titleLine =
+        task.body?.split(/\r?\n/).map((l) => l.trim()).find(Boolean) ||
+        'Nova tarefa';
+      const ticketId = task.ticketId ?? task.conversaId ?? null;
+      const avatarUrl = task.ticket?.contact?.profilePicUrl ?? null;
+      const creator =
+        task.createdBy?.name?.trim() ||
+        task.created_by?.name?.trim() ||
+        task.createdBy?.username ||
+        task.created_by?.username ||
+        null;
+      const dueLabel = task.dueAt
+        ? new Date(task.dueAt).toLocaleString('pt-BR', {
+            day: '2-digit',
+            month: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+          })
+        : null;
+      const bodyParts = [
+        creator && task.createdById !== profile.id ? `${creator}` : null,
+        contactName,
+        dueLabel ? `Lembrete ${dueLabel}` : null,
+        titleLine,
+      ].filter(Boolean);
+
+      // Toast imediato na criação (self-assign ou outro agente).
+      notifyMuralAssigned({
+        taskId: task.id,
+        ticketId,
+        body: bodyParts.join(' · '),
+        contactName,
+        avatarUrl,
+        title: 'Nova tarefa no Mural',
+      });
+      void refreshMuralBadge();
+
+      // Backup local do lembrete na data (além do cron).
+      if (task.dueAt) {
+        scheduleMuralReminder({
+          taskId: task.id,
+          dueAt: task.dueAt,
+          ticketId,
+          body: titleLine,
+          contactName,
+          avatarUrl,
+          title: 'Lembrete do Mural',
+        });
+      }
+    };
+
     socket.on('message.created', onMessage);
     socket.on('internal.message.created', onInternal);
+    socket.on('mural.reminder', onMuralReminder);
+    socket.on('mural.task.created', onMuralTaskCreated);
+    socket.on('mural.reminder.read', () => {
+      void refreshMuralBadge();
+    });
     return () => {
+      // Não zera o handler aqui — evita perder toast se o timer disparar
+      // entre o cleanup e o próximo setMuralReminderHandler.
       socket.off('message.created', onMessage);
       socket.off('internal.message.created', onInternal);
+      socket.off('mural.reminder', onMuralReminder);
+      socket.off('mural.task.created', onMuralTaskCreated);
+      socket.off('mural.reminder.read');
     };
-  }, [profile, notify, refreshInternalUnread]);
+  }, [profile, notify, refreshInternalUnread, refreshMuralBadge]);
 
   useEffect(() => {
     if (activeTab === 'comunicador-interno') {
       void refreshInternalUnread();
     }
-  }, [activeTab, refreshInternalUnread]);
+    if (activeTab === 'mural') {
+      void refreshMuralBadge();
+    }
+  }, [activeTab, refreshInternalUnread, refreshMuralBadge]);
 
   useEffect(() => {
     if (lockToWhatsapp && activeTab !== 'whatsapp') {
@@ -367,7 +557,9 @@ function AuthenticatedApp() {
       dismiss(n.id);
       return;
     }
-    if (n.ticketId) {
+    if (n.label === 'Mural' && !n.ticketId) {
+      setActiveTab('mural');
+    } else if (n.ticketId) {
       setPreselectedTicket(n.ticketId);
       setActiveTab('chat');
     } else if (n.label === 'Comunicador') {
@@ -376,18 +568,60 @@ function AuthenticatedApp() {
     dismiss(n.id);
   };
 
+  const closeMuralDuePopup = useCallback(() => {
+    setMuralDuePopup((current) => {
+      if (current?.taskId && !current.taskId.startsWith('anon-')) {
+        void api('/mural/reminders/read', {
+          method: 'POST',
+          body: JSON.stringify({ taskIds: [current.taskId] }),
+        })
+          .then(() => refreshMuralBadge())
+          .catch(() => undefined);
+      }
+      return muralDueQueueRef.current.shift() ?? null;
+    });
+  }, [refreshMuralBadge]);
+
+  const confirmLunchReturn = useCallback(async () => {
+    if (lunchReturnConfirming) return;
+    setLunchReturnConfirming(true);
+    try {
+      const updated = await api('/users/me/confirm-lunch-return', {
+        method: 'POST',
+      });
+      patchProfile(mapProfile(updated));
+    } catch (err) {
+      alert(
+        err instanceof Error
+          ? err.message
+          : 'Falha ao confirmar retorno ao atendimento',
+      );
+    } finally {
+      setLunchReturnConfirming(false);
+    }
+  }, [lunchReturnConfirming, patchProfile]);
+
   const notificationBell = notifications.length > 0 && (
     <span className="absolute -top-1 -right-1 w-4 h-4 bg-danger-500 rounded-full flex items-center justify-center text-[10px] text-white">
       {notifications.length}
     </span>
   );
 
+  const needsLunchReturn = Boolean(profile.lunch_return_required);
+
   return (
     <div className="flex h-screen overflow-hidden bg-ink-950">
       <LoginSessionBanner />
+      {needsLunchReturn && (
+        <LunchReturnModal
+          confirming={lunchReturnConfirming}
+          onConfirm={() => void confirmLunchReturn()}
+        />
+      )}
       {pendingTransfer &&
         pendingTransfer.pending_transfer_to === profile.id &&
-        !isWhatsappDisconnected && (
+        !isWhatsappDisconnected &&
+        !needsLunchReturn && (
         <TransferAcceptModal
           ticket={pendingTransfer}
           busy={transferBusy}
@@ -395,10 +629,29 @@ function AuthenticatedApp() {
           onReject={() => void handleRejectTransfer()}
         />
       )}
+      {muralDuePopup && !isWhatsappDisconnected && !needsLunchReturn && (
+        <MuralReminderModal
+          reminder={muralDuePopup}
+          onClose={closeMuralDuePopup}
+          onOpenConversation={() => {
+            const tid = muralDuePopup.ticketId;
+            closeMuralDuePopup();
+            if (tid) {
+              setPreselectedTicket(tid);
+              setActiveTab('chat');
+            }
+          }}
+          onOpenMural={() => {
+            closeMuralDuePopup();
+            setActiveTab('mural');
+          }}
+        />
+      )}
       <Sidebar
         active={activeTab}
         onNavigate={handleNavigate}
         internalUnreadCount={internalUnread}
+        muralUnreadCount={muralUnread}
         soundEnabled={soundEnabled}
         onToggleSound={() => setSoundEnabled(!soundEnabled)}
         notifications={notificationBell}
@@ -458,6 +711,16 @@ function AuthenticatedApp() {
             )}
             {activeTab === 'comunicador-interno' && !lockToWhatsapp && <InternalChatView />}
             {activeTab === 'grupos' && !lockToWhatsapp && <GroupsView />}
+            {activeTab === 'mural' && !lockToWhatsapp && (
+              <div className="flex-1 min-h-0 overflow-hidden">
+                <MuralView
+                  onOpenTicket={(ticketId) => {
+                    setPreselectedTicket(ticketId);
+                    setActiveTab('chat');
+                  }}
+                />
+              </div>
+            )}
           </>
         )}
       </main>

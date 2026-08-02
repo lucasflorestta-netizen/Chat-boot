@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2, Paperclip, Plus, Send, Smile, Zap } from 'lucide-react';
+import { Loader2, Paperclip, Plus, Send, Smile, StickyNote, Zap } from 'lucide-react';
 import type { CannedResponse, Message } from '../../types';
 import { autoCapitalize } from '../../lib/autoCapitalize';
 import { mediaUrl } from '../../lib/api';
@@ -31,6 +31,9 @@ interface MessageComposerProps {
   uploadStatusText?: string | null;
   placeholder?: string;
   onTyping?: (typing: boolean) => void;
+  /** Abre o popover de Nota Interna (footer). */
+  onOpenNote?: () => void;
+  noteActive?: boolean;
 }
 
 export function MessageComposer({
@@ -50,6 +53,8 @@ export function MessageComposer({
   uploadStatusText = null,
   placeholder = 'Digite uma mensagem... (use / para respostas rápidas)',
   onTyping,
+  onOpenNote,
+  noteActive = false,
 }: MessageComposerProps) {
   const [input, setInput] = useState('');
   const [showEmoji, setShowEmoji] = useState(false);
@@ -382,6 +387,25 @@ export function MessageComposer({
               >
                 <Zap className="w-4 h-4" />
               </button>
+              {onOpenNote && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowEmoji(false);
+                    setShowCanned(false);
+                    setSpellHint(null);
+                    onOpenNote();
+                  }}
+                  className={`btn-ghost p-2 rounded-lg ${
+                    noteActive ? 'bg-warning-500/15 text-warning-400' : ''
+                  }`}
+                  title="Nota interna"
+                  disabled={disabled}
+                  aria-pressed={noteActive}
+                >
+                  <StickyNote className="w-4 h-4" />
+                </button>
+              )}
             </div>
 
             <textarea

@@ -90,16 +90,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (mapped.id !== user.id) return;
       setProfile((prev) => (prev ? { ...prev, ...mapped } : mapped));
     };
+    const onLunchReturnRequired = (payload: { user?: unknown }) => {
+      const raw = payload?.user;
+      if (raw && typeof raw === 'object') {
+        const mapped = mapProfile(raw);
+        if (mapped.id !== user.id) return;
+        setProfile((prev) =>
+          prev
+            ? { ...prev, ...mapped, lunch_return_required: true }
+            : { ...mapped, lunch_return_required: true },
+        );
+        return;
+      }
+      setProfile((prev) =>
+        prev ? { ...prev, lunch_return_required: true } : prev,
+      );
+    };
     // Garante WS (e presença online) ao voltar para a aba / focar a janela.
     const ensureSocket = () => {
       if (document.visibilityState === 'hidden') return;
       connectSocket();
     };
     socket.on('user.updated', onUserUpdated);
+    socket.on('operator.lunch-return-required', onLunchReturnRequired);
     document.addEventListener('visibilitychange', ensureSocket);
     window.addEventListener('focus', ensureSocket);
     return () => {
       socket.off('user.updated', onUserUpdated);
+      socket.off('operator.lunch-return-required', onLunchReturnRequired);
       document.removeEventListener('visibilitychange', ensureSocket);
       window.removeEventListener('focus', ensureSocket);
     };

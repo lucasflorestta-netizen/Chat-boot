@@ -441,32 +441,32 @@ export function ChatView({ preselectedTicketId, onConsumePreselect, onSelectedTi
       label: 'Meus',
       count: mineCount,
       icon: <UserCog className="w-3.5 h-3.5" />,
-      accent: 'text-success-500',
-      accentMuted: 'text-success-500/80',
+      accent: 'text-success-700',
+      accentMuted: 'text-success-700',
     },
     {
       id: 'attending',
       label: 'Atendimento',
       count: attendingCount,
       icon: <MessageSquare className="w-3.5 h-3.5" />,
-      accent: 'text-brand-300',
-      accentMuted: 'text-brand-400/80',
+      accent: 'text-brand-700',
+      accentMuted: 'text-brand-800',
     },
     {
       id: 'triage',
       label: 'Triagem',
       count: triageTickets.length,
       icon: <CircleDot className="w-3.5 h-3.5" />,
-      accent: 'text-warning-400',
-      accentMuted: 'text-warning-400/80',
+      accent: 'text-warning-600',
+      accentMuted: 'text-warning-600',
     },
     {
       id: 'all',
       label: 'Todos',
       count: null,
       icon: <Inbox className="w-3.5 h-3.5" />,
-      accent: 'text-ink-100',
-      accentMuted: 'text-ink-300',
+      accent: 'text-ink-50',
+      accentMuted: 'text-ink-50',
     },
   ];
 
@@ -530,7 +530,7 @@ export function ChatView({ preselectedTicketId, onConsumePreselect, onSelectedTi
                 }`}
               >
                 <span
-                  className={`flex items-center gap-1.5 text-[11px] font-semibold leading-none ${
+                  className={`flex items-center gap-1.5 text-[11px] font-bold leading-none ${
                     active ? 'text-white/90' : t.accentMuted
                   }`}
                 >

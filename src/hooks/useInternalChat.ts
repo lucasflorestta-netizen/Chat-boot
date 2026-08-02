@@ -127,6 +127,7 @@ function peerToProfile(peer?: InternalChatPeer | null): Profile | null {
     work_end: null,
     lunch_start: null,
     lunch_end: null,
+    lunch_return_required: false,
     status: 'DISPONIVEL',
     avatar_url: peer.avatarUrl,
     is_active: peer.isActive ?? true,

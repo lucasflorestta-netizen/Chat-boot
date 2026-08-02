@@ -2,12 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { api } from '../../lib/api';
 import { mapTicket } from '../../lib/mappers';
 import { formatPhone } from '../../lib/formatPhone';
-import { useNpsRatings, useProfiles } from '../../hooks/useData';
+import { useProfiles } from '../../hooks/useData';
 import {
   MessageSquare,
-  CheckCircle,
   Clock,
   Ticket as TicketIcon,
+  Folder,
   Download,
   FileText,
   Star,
@@ -21,7 +21,8 @@ import {
   List,
 } from 'lucide-react';
 import type { Ticket } from '../../types';
-import { downloadDashboardReportPdf } from '../../lib/dashboardReportPdf';
+import { KpiCard } from '../dashboard/KpiCard';
+import { ModalRelatorioPDF } from '../dashboard/ModalRelatorioPDF';
 
 interface DashboardProps {
   onNavigateToChat: () => void;
@@ -56,7 +57,7 @@ const VISIBLE_CARDS_KEY = 'dashboard.visibleCards';
 
 const DEFAULT_VISIBLE_CARDS: Record<MetricCardKey, boolean> = {
   active: true,
-  finished: false,
+  finished: true,
   avgResponse: true,
   open: true,
 };
@@ -133,9 +134,11 @@ export function Dashboard({ onNavigateToChat, onOpenTicket }: DashboardProps) {
     openCount: number;
     closedToday: number;
     awaiting: number;
+    activeCount?: number;
+    finishedCount?: number;
     byStatus: { status: string; count: number }[];
   } | null>(null);
-  const [exportingPdf, setExportingPdf] = useState(false);
+  const [reportPdfOpen, setReportPdfOpen] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
 
   const [filterFrom, setFilterFrom] = useState(() => toDayInput(new Date()));
@@ -158,13 +161,17 @@ export function Dashboard({ onNavigateToChat, onOpenTicket }: DashboardProps) {
   const [cardsMenuOpen, setCardsMenuOpen] = useState(false);
   const cardsMenuRef = useRef<HTMLDivElement>(null);
 
+  const [npsSummary, setNpsSummary] = useState<{
+    total: number;
+    average: number | null;
+    distribution: Record<number, number>;
+  } | null>(null);
   const [npsRatings, setNpsRatings] = useState<NpsRatingRow[]>([]);
   const [npsRatingsTotal, setNpsRatingsTotal] = useState(0);
   const [npsRatingsLoading, setNpsRatingsLoading] = useState(false);
   const [npsRatingsError, setNpsRatingsError] = useState<string | null>(null);
   const [npsListOpen, setNpsListOpen] = useState(false);
 
-  const { summary: npsSummary } = useNpsRatings();
   const { profiles } = useProfiles();
 
   const agents = useMemo(
@@ -210,31 +217,85 @@ export function Dashboard({ onNavigateToChat, onOpenTicket }: DashboardProps) {
     }
   }, []);
 
-  useEffect(() => {
-    (async () => {
+  const loadMetrics = useCallback(
+    async (from: string, to: string, userId: string, rating: string) => {
+      if (from && to && from > to) {
+        setLoading(false);
+        return;
+      }
       try {
-        const [metricsData, ticketsData] = await Promise.all([
-          api<{
-            openCount: number;
-            closedToday: number;
-            awaiting: number;
-            avgResponseMs?: number | null;
-            avgResponseLabel?: string;
-            byStatus: { status: string; count: number }[];
-          }>('/dashboard/metrics'),
-          api<any[]>('/tickets'),
-        ]);
+        const params = new URLSearchParams();
+        if (from) params.set('from', from);
+        if (to) params.set('to', to);
+        if (userId) params.set('assigneeId', userId);
+        if (rating) params.set('rating', rating);
+        const qs = params.toString();
+        const metricsData = await api<{
+          openCount: number;
+          closedToday: number;
+          awaiting: number;
+          activeCount?: number;
+          finishedCount?: number;
+          avgResponseMs?: number | null;
+          avgResponseLabel?: string;
+          byStatus: { status: string; count: number }[];
+        }>(`/dashboard/metrics${qs ? `?${qs}` : ''}`);
         setMetrics(metricsData);
-        setTickets((ticketsData || []).map(mapTicket));
-        // KPI global (igual aos outros cards) — filtros do topo valem para gráfico/NPS/PDF.
         setAvgResponseTime(resolveAvgResponseLabel(metricsData));
       } catch (err) {
-        console.error('Dashboard load error:', err);
+        console.error('Dashboard metrics load error:', err);
       } finally {
         setLoading(false);
       }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const ticketsData = await api<any[]>('/tickets');
+        setTickets((ticketsData || []).map(mapTicket));
+      } catch (err) {
+        console.error('Dashboard tickets load error:', err);
+      }
     })();
   }, []);
+
+  const loadNpsSummary = useCallback(
+    async (from: string, to: string, userId: string, rating: string) => {
+      if (from && to && from > to) return;
+      try {
+        const params = new URLSearchParams();
+        if (from) params.set('from', from);
+        if (to) params.set('to', to);
+        if (userId) params.set('assigneeId', userId);
+        if (rating) params.set('rating', rating);
+        const qs = params.toString();
+        const data = await api<{
+          total: number;
+          average: number | null;
+          distribution: Record<number, number>;
+        }>(`/dashboard/nps${qs ? `?${qs}` : ''}`);
+        setNpsSummary({
+          total: data.total ?? 0,
+          average: data.average ?? null,
+          distribution: data.distribution ?? { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
+        });
+      } catch (err) {
+        console.error('Dashboard NPS load error:', err);
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    void loadMetrics(filterFrom, filterTo, filterUserId, filterRating);
+  }, [filterFrom, filterTo, filterUserId, filterRating, loadMetrics]);
+
+  useEffect(() => {
+    void loadNpsSummary(filterFrom, filterTo, filterUserId, filterRating);
+  }, [filterFrom, filterTo, filterUserId, filterRating, loadNpsSummary]);
 
   useEffect(() => {
     void loadByAttendant(filterFrom, filterTo);
@@ -334,24 +395,29 @@ export function Dashboard({ onNavigateToChat, onOpenTicket }: DashboardProps) {
   };
 
   const activeCount =
+    metrics?.activeCount ??
     metrics?.byStatus?.find((s) => s.status === 'EM_ATENDIMENTO')?.count ??
     tickets.filter((t) => t.status === 'attending').length;
   const triageCount =
     (metrics?.byStatus?.find((s) => s.status === 'EM_TRIAGEM')?.count ?? 0) +
-    (metrics?.awaiting ?? tickets.filter((t) => t.status === 'triage').length);
+    (metrics?.awaiting ?? 0);
+  const openCount = metrics?.openCount ?? triageCount;
   const finishedCount =
+    metrics?.finishedCount ??
+    metrics?.closedToday ??
     metrics?.byStatus?.find((s) => s.status === 'FECHADO')?.count ??
     tickets.filter((t) => t.status === 'finished').length;
   const finishedTickets = tickets.filter((t) => t.status === 'finished');
 
   const npsData = useMemo(() => {
     const total = npsSummary?.total ?? 0;
-    const dist = [1, 2, 3, 4, 5].map((star) => ({
-      star,
-      count: npsSummary?.distribution?.[star] ?? 0,
-    }));
     const avg = npsSummary?.average ?? 0;
-    return { total, dist, avg };
+    const dist = [5, 4, 3, 2, 1].map((star) => {
+      const count = npsSummary?.distribution?.[star] ?? 0;
+      const pct = total > 0 ? Math.round((count / total) * 100) : 0;
+      return { star, count, pct };
+    });
+    return { total, avg, dist };
   }, [npsSummary]);
 
   const maxAttendantCount = useMemo(
@@ -400,73 +466,13 @@ export function Dashboard({ onNavigateToChat, onOpenTicket }: DashboardProps) {
     downloadCSV(csv, 'tickets_finalizados.csv');
   };
 
-  const exportReportPdf = async () => {
+  const openReportPdfModal = () => {
     if (filterFrom && filterTo && filterFrom > filterTo) {
       setReportError('A data inicial não pode ser maior que a final.');
       return;
     }
     setReportError(null);
-    setExportingPdf(true);
-    try {
-      const params = new URLSearchParams();
-      if (filterFrom) params.set('from', filterFrom);
-      if (filterTo) params.set('to', filterTo);
-      if (filterUserId) params.set('assigneeId', filterUserId);
-      if (filterRating) params.set('rating', filterRating);
-      const qs = params.toString();
-      const report = await api<{
-        filters: {
-          from: string | null;
-          to: string | null;
-          assigneeId: string | null;
-          assigneeName: string | null;
-          rating: number | null;
-        };
-        total: number;
-        openCount: number;
-        awaiting: number;
-        activeCount: number;
-        finishedCount: number;
-        closedInPeriod: number;
-        avgResponseLabel?: string;
-        avgResponseMs?: number | null;
-        byStatus: { status: string; count: number }[];
-        nps: {
-          total: number;
-          average: number | null;
-          distribution: Record<number, number>;
-        };
-      }>(`/dashboard/report${qs ? `?${qs}` : ''}`);
-
-      downloadDashboardReportPdf({
-        generatedAt: new Date(),
-        filters: report.filters,
-        activeCount: report.activeCount,
-        finishedCount: report.finishedCount,
-        openCount: report.openCount,
-        awaiting: report.awaiting,
-        closedInPeriod: report.closedInPeriod,
-        totalTickets: report.total,
-        avgResponseTime: resolveAvgResponseLabel(report) || avgResponseTime,
-        byStatus: report.byStatus,
-        nps: {
-          total: report.nps.total,
-          average: report.nps.average,
-          distribution: {
-            1: report.nps.distribution?.[1] ?? 0,
-            2: report.nps.distribution?.[2] ?? 0,
-            3: report.nps.distribution?.[3] ?? 0,
-            4: report.nps.distribution?.[4] ?? 0,
-            5: report.nps.distribution?.[5] ?? 0,
-          },
-        },
-      });
-    } catch (err) {
-      console.error('Report export error:', err);
-      setReportError(err instanceof Error ? err.message : 'Falha ao gerar relatório');
-    } finally {
-      setExportingPdf(false);
-    }
+    setReportPdfOpen(true);
   };
 
   const metricCards: {
@@ -474,40 +480,40 @@ export function Dashboard({ onNavigateToChat, onOpenTicket }: DashboardProps) {
     label: string;
     value: string | number;
     icon: ReactNode;
-    color: string;
-    bg: string;
+    iconBg: string;
+    iconColor: string;
   }[] = [
     {
       key: 'active',
       label: CARD_LABELS.active,
       value: activeCount,
       icon: <MessageSquare className="w-5 h-5" />,
-      color: 'text-brand-400',
-      bg: 'bg-brand-500/10',
+      iconBg: '#0F2E33',
+      iconColor: '#2DD4BF',
     },
     {
       key: 'finished',
       label: CARD_LABELS.finished,
       value: finishedCount,
-      icon: <CheckCircle className="w-5 h-5" />,
-      color: 'text-success-500',
-      bg: 'bg-success-500/10',
+      icon: <TicketIcon className="w-5 h-5" />,
+      iconBg: '#3D2616',
+      iconColor: '#FB923C',
     },
     {
       key: 'avgResponse',
       label: CARD_LABELS.avgResponse,
       value: avgResponseTime,
       icon: <Clock className="w-5 h-5" />,
-      color: 'text-warning-400',
-      bg: 'bg-warning-500/10',
+      iconBg: '#2A2A4A',
+      iconColor: '#818CF8',
     },
     {
       key: 'open',
       label: CARD_LABELS.open,
-      value: triageCount || metrics?.openCount || 0,
-      icon: <TicketIcon className="w-5 h-5" />,
-      color: 'text-danger-400',
-      bg: 'bg-danger-500/10',
+      value: openCount,
+      icon: <Folder className="w-5 h-5" />,
+      iconBg: '#3D3311',
+      iconColor: '#FBBF24',
     },
   ];
 
@@ -587,16 +593,12 @@ export function Dashboard({ onNavigateToChat, onOpenTicket }: DashboardProps) {
             )}
           </div>
           <button
-            onClick={() => void exportReportPdf()}
-            disabled={exportingPdf}
+            type="button"
+            onClick={openReportPdfModal}
             className="btn-primary"
-            title="Baixar relatório PDF com os filtros selecionados"
+            title="Configurar e baixar relatório PDF de avaliações"
           >
-            {exportingPdf ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <FileText className="w-4 h-4" />
-            )}
+            <FileText className="w-4 h-4" />
             Gerar Relatório PDF
           </button>
           <button onClick={exportTicketsCSV} className="btn-secondary">
@@ -701,25 +703,16 @@ export function Dashboard({ onNavigateToChat, onOpenTicket }: DashboardProps) {
       </div>
 
       {visibleMetricCards.length > 0 ? (
-        <div
-          className={`grid grid-cols-1 md:grid-cols-2 gap-4 ${
-            visibleMetricCards.length >= 4
-              ? 'lg:grid-cols-4'
-              : visibleMetricCards.length === 3
-                ? 'lg:grid-cols-3'
-                : 'lg:grid-cols-2'
-          }`}
-        >
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
           {visibleMetricCards.map((m) => (
-            <div key={m.key} className="card p-5 hover:border-ink-600 transition-colors">
-              <div className="flex items-center justify-between mb-3">
-                <div className={`w-10 h-10 rounded-lg ${m.bg} ${m.color} flex items-center justify-center`}>
-                  {m.icon}
-                </div>
-              </div>
-              <p className="text-2xl font-bold text-white">{m.value}</p>
-              <p className="text-sm text-ink-300 mt-1">{m.label}</p>
-            </div>
+            <KpiCard
+              key={m.key}
+              label={m.label}
+              value={m.value}
+              icon={m.icon}
+              iconBg={m.iconBg}
+              iconColor={m.iconColor}
+            />
           ))}
         </div>
       ) : (
@@ -728,8 +721,8 @@ export function Dashboard({ onNavigateToChat, onOpenTicket }: DashboardProps) {
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.15fr)] gap-6 items-start">
-        <div className="card p-5">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+        <div className="card p-5 h-full">
           <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
             <div className="flex items-center gap-2 min-w-0">
               <Users className="w-5 h-5 text-brand-400 shrink-0" />
@@ -802,14 +795,17 @@ export function Dashboard({ onNavigateToChat, onOpenTicket }: DashboardProps) {
           )}
         </div>
 
-        <div className="card p-5">
-          <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
-            <div className="flex items-center gap-2">
-              <Star className="w-5 h-5 text-warning-400" />
-              <h3 className="text-sm font-semibold text-white">Avaliação de Atendimento (NPS)</h3>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-ink-300">{npsData.total} avaliações</span>
+        <div className="bg-[#151821] border border-[#2A2E3A] rounded-xl p-5 sm:p-6 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04)] h-full min-w-0">
+          <div className="flex items-start justify-between gap-3 flex-wrap pb-4 mb-5 border-b border-[#2A2E3A]">
+            <h3 className="text-lg sm:text-xl font-bold text-white leading-none">
+              Distribuição de Satisfação
+            </h3>
+            <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+              <span className="text-[13px] text-[#9CA3AF]">
+                {periodLabel}
+                {' · '}
+                {npsData.total} avaliação{npsData.total === 1 ? '' : 'ões'}
+              </span>
               <button
                 type="button"
                 className="btn-ghost text-xs px-2.5 py-1 inline-flex items-center gap-1.5"
@@ -823,38 +819,36 @@ export function Dashboard({ onNavigateToChat, onOpenTicket }: DashboardProps) {
           </div>
 
           {npsData.total === 0 ? (
-            <div className="flex flex-col items-center justify-center py-8 text-ink-300">
+            <div className="flex flex-col items-center justify-center py-10 text-[#6B7280]">
               <Star className="w-10 h-10 mb-2 opacity-30" />
               <p className="text-sm">Nenhuma avaliação recebida ainda</p>
             </div>
           ) : (
-            <>
-              <div className="flex items-center gap-3 mb-4">
-                <span className="text-3xl font-bold text-white">{Number(npsData.avg).toFixed(1)}</span>
-                <div className="flex">
-                  {[1, 2, 3, 4, 5].map((s) => (
-                    <Star
-                      key={s}
-                      className={`w-4 h-4 ${s <= Math.round(Number(npsData.avg)) ? 'text-warning-400 fill-warning-400' : 'text-ink-600'}`}
-                    />
-                  ))}
-                </div>
-              </div>
-              <div className="space-y-2">
-                {npsData.dist.map((d) => (
-                  <div key={d.star} className="flex items-center gap-3">
-                    <span className="text-xs text-ink-200 w-4">{d.star}★</span>
-                    <div className="flex-1 h-6 bg-ink-800 rounded-md overflow-hidden">
-                      <div
-                        className="h-full bg-gradient-to-r from-warning-500 to-warning-400 rounded-md transition-all duration-500"
-                        style={{ width: `${npsData.total > 0 ? (d.count / npsData.total) * 100 : 0}%` }}
+            <div className="flex flex-col gap-5">
+              {npsData.dist.map((d) => (
+                <div key={d.star} className="flex items-center gap-3 min-w-0">
+                  <div className="flex items-center gap-0.5 w-[92px] shrink-0">
+                    {Array.from({ length: d.star }, (_, i) => (
+                      <Star
+                        key={i}
+                        className="w-3.5 h-3.5 text-[#FBBF24] fill-[#FBBF24]"
                       />
-                    </div>
-                    <span className="text-xs text-ink-300 w-8 text-right">{d.count}</span>
+                    ))}
                   </div>
-                ))}
-              </div>
-            </>
+                  <div className="flex-1 h-2.5 rounded-full bg-[#1C2030] overflow-hidden min-w-0">
+                    <div
+                      className="h-full rounded-full bg-gradient-to-r from-teal-600 to-cyan-400 transition-all duration-500"
+                      style={{
+                        width: `${d.count > 0 ? Math.max(d.pct, 2) : 0}%`,
+                      }}
+                    />
+                  </div>
+                  <span className="text-sm font-semibold text-white tabular-nums whitespace-nowrap shrink-0">
+                    {d.pct}% ({d.count})
+                  </span>
+                </div>
+              ))}
+            </div>
           )}
         </div>
       </div>
@@ -1079,6 +1073,20 @@ export function Dashboard({ onNavigateToChat, onOpenTicket }: DashboardProps) {
           </div>
         </div>
       )}
+
+      <ModalRelatorioPDF
+        open={reportPdfOpen}
+        onClose={() => setReportPdfOpen(false)}
+        filters={{
+          de: filterFrom,
+          ate: filterTo,
+          usuario_id: filterUserId,
+          nota: filterRating,
+          usuarioNome: filterUserId
+            ? agents.find((a) => a.id === filterUserId)?.name ?? null
+            : null,
+        }}
+      />
     </div>
   );
 }

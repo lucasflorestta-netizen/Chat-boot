@@ -92,6 +92,39 @@ export async function api<T = unknown>(path: string, options: RequestInit = {}):
   return res.json();
 }
 
+/** Mesmo contrato de `api`, mas retorna Blob (PDF, arquivos, etc.). */
+export async function apiBlob(path: string, options: RequestInit = {}): Promise<Blob> {
+  const token = getToken();
+  const headers = new Headers(options.headers);
+  if (!headers.has('Content-Type') && !(options.body instanceof FormData)) {
+    headers.set('Content-Type', 'application/json');
+  }
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  const API_URL = resolveApiUrl();
+  const res = await fetch(`${API_URL}${path.startsWith('/') ? path : `/${path}`}`, {
+    ...options,
+    headers,
+  });
+  if (!res.ok) {
+    let msg: unknown = res.statusText;
+    const raw = await res.text().catch(() => '');
+    if (raw) {
+      try {
+        const j = JSON.parse(raw) as { message?: string | string[] };
+        msg = Array.isArray(j.message) ? j.message.join(' ') : j.message || raw;
+      } catch {
+        msg = raw.trim() || msg;
+      }
+    }
+    const text = typeof msg === 'string' ? msg : 'Request failed';
+    if (res.status === 401 && token) {
+      notifySessionExpired(text);
+    }
+    throw new Error(text);
+  }
+  return res.blob();
+}
+
 export function mediaUrl(path: string | null | undefined): string | null {
   if (!path) return null;
   if (path.startsWith('http') || path.startsWith('blob:') || path.startsWith('data:')) return path;

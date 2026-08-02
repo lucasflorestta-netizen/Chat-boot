@@ -32,6 +32,11 @@ export interface Profile {
   work_end: string | null;
   lunch_start: string | null;
   lunch_end: string | null;
+  /**
+   * Após almoço/expediente automático: precisa confirmar retorno.
+   * Enquanto true, não recebe novos chamados (fica OFFLINE).
+   */
+  lunch_return_required: boolean;
   /** Availability for new tickets (DISPONIVEL / PAUSA / OFFLINE). */
   status: AgentStatus;
   avatar_url: string | null;
@@ -268,3 +273,53 @@ export const STATUS_COLORS: Record<TicketStatus, string> = {
   attending: '#3b82f6',
   finished: '#6b7280',
 };
+
+export type MuralTaskStatus = 'PENDING' | 'DONE' | 'CANCELLED';
+export type MuralTaskPriority = 'URGENT' | 'HIGH' | 'MEDIUM' | 'LOW';
+
+export interface MuralTaskAssignee {
+  id: string;
+  name: string;
+  username?: string;
+  avatarUrl?: string | null;
+  role?: string;
+}
+
+export interface MuralTask {
+  id: string;
+  ticketId: string;
+  body: string;
+  dueAt: string;
+  status: MuralTaskStatus;
+  priority?: MuralTaskPriority;
+  createdById: string;
+  assignedToId: string;
+  internalMessageId?: string | null;
+  notifiedAt?: string | null;
+  reminderReadAt?: string | null;
+  completedAt?: string | null;
+  createdAt: string;
+  createdBy?: MuralTaskAssignee | null;
+  assignedTo?: MuralTaskAssignee | null;
+  /** Campos enriquecidos pela API (mockup). */
+  clienteNome?: string | null;
+  conversaId?: string;
+  notaInternaPreview?: string | null;
+  prioridade?: MuralTaskPriority;
+  atribuidoPara?: MuralTaskAssignee | null;
+  cliente_nome?: string | null;
+  conversa_id?: string;
+  nota_interna_preview?: string | null;
+  atribuido_para?: MuralTaskAssignee | null;
+  ticket?: {
+    id: string;
+    protocolo: string;
+    status: string;
+    contact?: {
+      id: string;
+      displayName?: string | null;
+      phone?: string | null;
+      profilePicUrl?: string | null;
+    } | null;
+  } | null;
+}

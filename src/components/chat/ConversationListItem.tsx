@@ -71,6 +71,10 @@ export function ConversationListItem({
   const timeSource = ticket.last_message?.created_at ?? ticket.last_message_at;
   const preview = previewText(ticket.last_message);
   const unread = ticket.unread_count > 0;
+  const attendantName =
+    ticket.assigned_agent?.name?.trim() ||
+    ticket.assigned_agent?.username?.trim() ||
+    null;
 
   return (
     <button
@@ -112,8 +116,22 @@ export function ConversationListItem({
           </span>
         </div>
 
-        {ticket.protocolo && (
-          <p className="text-[10px] font-mono text-ink-400 truncate mt-0.5">{ticket.protocolo}</p>
+        {(ticket.protocolo || attendantName) && (
+          <p className="flex items-center gap-1.5 text-[10px] font-semibold text-ink-300 truncate mt-0.5 min-w-0">
+            {ticket.protocolo && (
+              <span className="font-mono flex-shrink-0">{ticket.protocolo}</span>
+            )}
+            {ticket.protocolo && attendantName && (
+              <span className="text-ink-500 font-semibold flex-shrink-0" aria-hidden>
+                ·
+              </span>
+            )}
+            {attendantName && (
+              <span className="truncate" title={attendantName}>
+                {attendantName}
+              </span>
+            )}
+          </p>
         )}
 
         <div className="flex items-center justify-between gap-2 mt-0.5">

@@ -17,6 +17,7 @@ import {
   VolumeX,
   WifiOff,
   StickyNote,
+  ClipboardList,
   ChevronDown,
   Moon,
   Sun,
@@ -53,7 +54,8 @@ export type TabId =
   | 'tags'
   | 'canned'
   | 'comunicador-interno'
-  | 'grupos';
+  | 'grupos'
+  | 'mural';
 
 interface NavItem {
   id: TabId;
@@ -73,12 +75,14 @@ const navItems: NavItem[] = [
   { id: 'canned', label: 'Respostas Rápidas', icon: <Zap className="w-5 h-5" />, adminOnly: true },
   { id: 'comunicador-interno', label: 'Comunicador Interno', icon: <MessageCircleMore className="w-5 h-5" /> },
   { id: 'grupos', label: 'Grupos', icon: <UsersRound className="w-5 h-5" /> },
+  { id: 'mural', label: 'Mural', icon: <ClipboardList className="w-5 h-5" /> },
 ];
 
 interface SidebarProps {
   active: TabId;
   onNavigate: (tab: TabId) => void;
   internalUnreadCount?: number;
+  muralUnreadCount?: number;
   soundEnabled: boolean;
   onToggleSound: () => void;
   notifications: ReactNode;
@@ -88,6 +92,7 @@ export function Sidebar({
   active,
   onNavigate,
   internalUnreadCount = 0,
+  muralUnreadCount = 0,
   soundEnabled,
   onToggleSound,
   notifications,
@@ -240,6 +245,11 @@ export function Sidebar({
                 {item.id === 'comunicador-interno' && internalUnreadCount > 0 && (
                   <span className="badge bg-danger-500 text-white px-1.5 min-w-[20px] justify-center">
                     {internalUnreadCount}
+                  </span>
+                )}
+                {item.id === 'mural' && muralUnreadCount > 0 && (
+                  <span className="badge bg-danger-500 text-white px-1.5 min-w-[20px] justify-center">
+                    {muralUnreadCount}
                   </span>
                 )}
               </button>

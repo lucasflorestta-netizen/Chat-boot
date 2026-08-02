@@ -155,6 +155,9 @@ export function mapProfile(raw: any): Profile {
     work_end: raw.workEnd ?? raw.work_end ?? null,
     lunch_start: raw.lunchStart ?? raw.lunch_start ?? null,
     lunch_end: raw.lunchEnd ?? raw.lunch_end ?? null,
+    lunch_return_required: Boolean(
+      raw.lunchReturnRequired ?? raw.lunch_return_required ?? false,
+    ),
     status: mapAgentStatus(raw.status),
     avatar_url: mediaUrl(raw.avatarUrl ?? raw.avatar_url),
     is_active: raw.isActive ?? raw.is_active ?? true,

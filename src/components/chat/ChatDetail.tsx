@@ -9,6 +9,10 @@ import { api, mediaUrl, uploadFile } from '../../lib/api';
 import { newClientId } from '../../lib/id';
 import { departmentLabel, mapMessage, toApiMediaType } from '../../lib/mappers';
 import {
+  notifyMuralAssigned,
+  scheduleMuralReminder,
+} from '../../lib/muralReminders';
+import {
   loadRecentStickers,
   mergeRecentStickers,
   pushRecentSticker,
@@ -23,6 +27,7 @@ import { MessageBubble } from './MessageBubble';
 import { MessageComposer } from './MessageComposer';
 import { MediaPreview } from './MediaPreview';
 import { WallpaperPicker } from './WallpaperPicker';
+import { NotaInternaForm } from './NotaInternaForm';
 import { detectMediaType, MAX_UPLOAD_BYTES } from './messageUtils';
 import {
   Tag as TagIcon,
@@ -536,12 +541,77 @@ export function ChatDetail({
     }
   };
 
-  const handleAddNote = async (text: string) => {
-    if (!profile || !text.trim()) return;
-    await api(`/tickets/${ticket.id}/messages`, {
-      method: 'POST',
-      body: JSON.stringify({ body: text.trim(), mediaType: 'NOTE' }),
-    });
+  const handleAddNote = async (payload: {
+    text: string;
+    postToMural: boolean;
+    dueAt: string;
+    assignedToId: string;
+    priority: 'URGENT' | 'HIGH' | 'MEDIUM' | 'LOW';
+  }) => {
+    if (!profile || !payload.text.trim()) return;
+    if (payload.postToMural) {
+      if (!payload.dueAt) return;
+      // datetime-local (YYYY-MM-DDTHH:mm) sem TZ — interpreta como hora local.
+      const dueAtIso = localDateTimeToIso(payload.dueAt);
+      const assigneeId = payload.assignedToId || profile.id;
+      const created = await api<{
+        id?: string;
+        dueAt?: string;
+        body?: string;
+        ticketId?: string;
+      }>(`/tickets/${ticket.id}/mural-tasks`, {
+        method: 'POST',
+        body: JSON.stringify({
+          body: payload.text.trim(),
+          dueAt: dueAtIso,
+          assignedToId: assigneeId,
+          priority: payload.priority || 'MEDIUM',
+          alsoCreateInternalNote: true,
+          toUserId: assigneeId,
+        }),
+      });
+
+      // Notificação imediata + lembrete na data (responsável = eu).
+      // Outros agentes recebem via socket mural.task.created no App.
+      if (created?.id && assigneeId === profile.id) {
+        const titleLine =
+          (created.body ?? payload.text)
+            .split(/\r?\n/)
+            .map((l) => l.trim())
+            .find(Boolean) || 'Nova tarefa';
+        const dueLabel = new Date(created.dueAt ?? dueAtIso).toLocaleString(
+          'pt-BR',
+          {
+            day: '2-digit',
+            month: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+          },
+        );
+        notifyMuralAssigned({
+          taskId: created.id,
+          ticketId: created.ticketId ?? ticket.id,
+          body: `${ticket.contact?.name ?? 'Cliente'} · Lembrete ${dueLabel} · ${titleLine}`,
+          contactName: ticket.contact?.name ?? 'Cliente',
+          avatarUrl: ticket.contact?.profile_pic_url ?? null,
+          title: 'Nova tarefa no Mural',
+        });
+        scheduleMuralReminder({
+          taskId: created.id,
+          dueAt: created.dueAt ?? dueAtIso,
+          ticketId: created.ticketId ?? ticket.id,
+          body: titleLine,
+          contactName: ticket.contact?.name ?? 'Cliente',
+          avatarUrl: ticket.contact?.profile_pic_url ?? null,
+          title: 'Lembrete do Mural',
+        });
+      }
+    } else {
+      await api(`/tickets/${ticket.id}/messages`, {
+        method: 'POST',
+        body: JSON.stringify({ body: payload.text.trim(), mediaType: 'NOTE' }),
+      });
+    }
     setShowNote(false);
   };
 
@@ -1037,15 +1107,32 @@ export function ChatDetail({
           Modo leitura — assuma ou transfira o atendimento para responder.
         </div>
       ) : (
-        <div className={canInteract ? undefined : 'opacity-60'}>
-          {(showNote || showSchedule) && canInteract && (
+        <div className={`relative ${canInteract ? undefined : 'opacity-60'}`}>
+          {showSchedule && canInteract && (
             <div className="border-t border-ink-700 bg-ink-900 px-3 pt-3">
-              {showNote && <NoteInput onSave={handleAddNote} onCancel={() => setShowNote(false)} />}
-              {showSchedule && (
-                <ScheduleInput onSave={handleSchedule} onCancel={() => setShowSchedule(false)} />
-              )}
+              <ScheduleInput onSave={handleSchedule} onCancel={() => setShowSchedule(false)} />
             </div>
           )}
+
+          {showNote && canInteract && (
+            <>
+              <div
+                className="fixed inset-0 z-40 bg-black/20"
+                onClick={() => setShowNote(false)}
+                aria-hidden
+              />
+              <div className="absolute bottom-[70px] left-4 z-50 w-[360px] rounded-xl border border-[#1E293B] bg-[#151E2B] p-3 shadow-2xl">
+                <NotaInternaForm
+                  variant="popover"
+                  profiles={profiles}
+                  currentUserId={profile?.id}
+                  onSave={handleAddNote}
+                  onCancel={() => setShowNote(false)}
+                />
+              </div>
+            </>
+          )}
+
           <MessageComposer
             contactName={ticket.contact?.name}
             replyingTo={canInteract ? replyingTo : null}
@@ -1059,6 +1146,15 @@ export function ChatDetail({
             canned={canned}
             uploading={uploading}
             disabled={!canInteract}
+            noteActive={showNote}
+            onOpenNote={
+              canInteract
+                ? () => {
+                    setShowSchedule(false);
+                    setShowNote(true);
+                  }
+                : undefined
+            }
             placeholder={
               canInteract
                 ? 'Digite uma mensagem... (use / para respostas rápidas)'
@@ -1069,6 +1165,35 @@ export function ChatDetail({
       )}
     </div>
   );
+}
+
+/** Converte valor de datetime-local (`YYYY-MM-DDTHH:mm`) para ISO em UTC. */
+function localDateTimeToIso(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return new Date().toISOString();
+  // Já veio com timezone / Z
+  if (/[zZ]|[+-]\d{2}:\d{2}$/.test(trimmed)) {
+    const d = new Date(trimmed);
+    return Number.isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+  }
+  const m = trimmed.match(
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/,
+  );
+  if (!m) {
+    const d = new Date(trimmed);
+    return Number.isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+  }
+  const [, ys, ms, ds, hs, mins, ss] = m;
+  const local = new Date(
+    Number(ys),
+    Number(ms) - 1,
+    Number(ds),
+    Number(hs),
+    Number(mins),
+    Number(ss ?? 0),
+    0,
+  );
+  return local.toISOString();
 }
 
 function isSameDay(a: string, b: string) {
@@ -1088,34 +1213,6 @@ function DateSeparator({ date }: { date: string }) {
   return (
     <div className="flex items-center justify-center my-3">
       <span className="text-[10px] text-ink-300 bg-ink-800 px-3 py-1 rounded-full">{label}</span>
-    </div>
-  );
-}
-
-function NoteInput({ onSave, onCancel }: { onSave: (text: string) => void; onCancel: () => void }) {
-  const [text, setText] = useState('');
-  return (
-    <div className="mb-2 bg-warning-500/10 border border-warning-500/30 rounded-lg p-2">
-      <div className="flex items-center gap-2 mb-1">
-        <StickyNote className="w-4 h-4 text-warning-400" />
-        <span className="text-xs font-medium text-warning-400">Nota Interna (não enviada ao cliente)</span>
-      </div>
-      <textarea
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        autoFocus
-        rows={2}
-        placeholder="Digite uma observação interna..."
-        className="input bg-ink-800 text-sm"
-      />
-      <div className="flex gap-2 mt-2">
-        <button onClick={() => onSave(text)} className="btn-primary text-xs px-3 py-1">
-          Salvar Nota
-        </button>
-        <button onClick={onCancel} className="btn-ghost text-xs px-3 py-1">
-          Cancelar
-        </button>
-      </div>
     </div>
   );
 }

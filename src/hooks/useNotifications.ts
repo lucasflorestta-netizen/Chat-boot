@@ -16,6 +16,8 @@ export interface NotifyOptions {
   avatarUrl?: string | null;
   ticketId?: string | null;
   label?: string;
+  /** false = só som + Notification do SO (sem toast na tela). Default true. */
+  toast?: boolean;
 }
 
 let counter = 0;
@@ -53,6 +55,12 @@ export function useNotifications() {
 
   const notify = useCallback(
     (type: NotificationType, title: string, body: string, options?: NotifyOptions) => {
+      const showToast = options?.toast !== false;
+      playSound(type);
+      if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+        new Notification(title, { body });
+      }
+      if (!showToast) return;
       const id = `notif-${++counter}`;
       setNotifications((prev) => [
         ...prev,
@@ -66,10 +74,6 @@ export function useNotifications() {
           label: options?.label,
         },
       ]);
-      playSound(type);
-      if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-        new Notification(title, { body });
-      }
       setTimeout(() => {
         setNotifications((prev) => prev.filter((n) => n.id !== id));
       }, 5000);
