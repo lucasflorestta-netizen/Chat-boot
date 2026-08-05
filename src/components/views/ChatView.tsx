@@ -5,6 +5,7 @@ import {
   useAppearanceSettings,
   useContacts,
   useProfiles,
+  upsertTicketFromApi,
 } from '../../hooks/useData';
 import { api } from '../../lib/api';
 import { mapTicket } from '../../lib/mappers';
@@ -111,6 +112,39 @@ function sortByLastMessage(tickets: Ticket[]): Ticket[] {
   return [...tickets].sort((a, b) => activityAt(b) - activityAt(a));
 }
 
+/** Mantém a ordem visual estável enquanto o usuário clica (evita miss por reordenação). */
+function applyFrozenOrder(sorted: Ticket[], frozenIds: string[] | null): Ticket[] {
+  if (!frozenIds?.length) return sorted;
+  const byId = new Map(sorted.map((t) => [t.id, t]));
+  const used = new Set<string>();
+  const kept: Ticket[] = [];
+  for (const id of frozenIds) {
+    const t = byId.get(id);
+    if (!t) continue;
+    kept.push(t);
+    used.add(id);
+  }
+  const newcomers = sorted.filter((t) => !used.has(t.id));
+  return [...newcomers, ...kept];
+}
+
+function selectionNeedsSync(prev: Ticket, next: Ticket): boolean {
+  return (
+    prev.status !== next.status ||
+    prev.unread_count !== next.unread_count ||
+    prev.assigned_to !== next.assigned_to ||
+    prev.pending_transfer_to !== next.pending_transfer_to ||
+    prev.sectorId !== next.sectorId ||
+    prev.protocolo !== next.protocolo ||
+    prev.last_message_at !== next.last_message_at ||
+    prev.last_message?.id !== next.last_message?.id ||
+    prev.contact?.name !== next.contact?.name ||
+    prev.contact?.profile_pic_url !== next.contact?.profile_pic_url ||
+    prev.contact?.phone !== next.contact?.phone ||
+    (prev.tags?.length ?? 0) !== (next.tags?.length ?? 0)
+  );
+}
+
 export function ChatView({ preselectedTicketId, onConsumePreselect, onSelectedTicketChange }: ChatViewProps) {
   const { profile } = useAuth();
   const isAdmin = profile?.role === 'admin';
@@ -131,6 +165,10 @@ export function ChatView({ preselectedTicketId, onConsumePreselect, onSelectedTi
   const { settings: appearance, saving: wallpaperSaving, update: updateAppearance } =
     useAppearanceSettings();
   const photoRefreshAttempted = useRef<Set<string>>(new Set());
+  const frozenOrderIdsRef = useRef<string[] | null>(null);
+  const orderFreezeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [orderFreezeTick, setOrderFreezeTick] = useState(0);
+  const searchedIdsRef = useRef<string[]>([]);
 
   const attendantOptions = useMemo(() => {
     if (!canFilterByAttendant) return [];
@@ -280,7 +318,7 @@ export function ChatView({ preselectedTicketId, onConsumePreselect, onSelectedTi
     filterAssigneeId,
   ]);
 
-  const searched = useMemo(() => {
+  const searchedRaw = useMemo(() => {
     let result = tabFiltered;
     if (search) {
       const q = search.toLowerCase().trim();
@@ -297,48 +335,80 @@ export function ChatView({ preselectedTicketId, onConsumePreselect, onSelectedTi
     return result;
   }, [tabFiltered, search, filterTag]);
 
-  // Sem foto local (/uploads/), pede refresh (CDN ou vazio).
+  const searched = useMemo(
+    () => applyFrozenOrder(searchedRaw, frozenOrderIdsRef.current),
+    [searchedRaw, orderFreezeTick],
+  );
+  searchedIdsRef.current = searched.map((t) => t.id);
+
   useEffect(() => {
-    const needsRefresh = (url: string | null | undefined) => {
-      if (!url) return true;
-      return !url.includes('/uploads/');
+    return () => {
+      if (orderFreezeTimerRef.current) clearTimeout(orderFreezeTimerRef.current);
     };
-    const missing = searched
-      .map((t) => t.contact)
-      .filter(
-        (c): c is NonNullable<typeof c> =>
-          !!c?.id && needsRefresh(c.profile_pic_url),
-      )
-      .filter((c) => !photoRefreshAttempted.current.has(c.id));
+  }, []);
 
-    // Limita rajada (Baileys é serial no backend).
-    for (const contact of missing.slice(0, 8)) {
-      photoRefreshAttempted.current.add(contact.id);
-      void api(`/whatsapp/contacts/${contact.id}/refresh-photo`, { method: 'POST' }).catch(
-        () => {
-          /* silencioso — privacidade WA / timeout */
-        },
-      );
-    }
-  }, [searched]);
-
+  // Troca de aba/filtro: libera ordem congelada.
   useEffect(() => {
-    if (selectedTicket) {
-      const updated = ticketsWithAgenda.find((t) => t.id === selectedTicket.id);
-      if (
-        updated &&
-        (updated !== selectedTicket ||
-          updated.contact?.profile_pic_url !== selectedTicket.contact?.profile_pic_url ||
-          updated.contact?.name !== selectedTicket.contact?.name)
-      ) {
-        setSelectedTicket(updated);
+    frozenOrderIdsRef.current = null;
+    if (orderFreezeTimerRef.current) {
+      clearTimeout(orderFreezeTimerRef.current);
+      orderFreezeTimerRef.current = null;
+    }
+    setOrderFreezeTick((n) => n + 1);
+  }, [tab, search, filterTag, filterAssigneeId]);
+
+  const freezeListOrder = () => {
+    frozenOrderIdsRef.current = searchedIdsRef.current.slice();
+    setOrderFreezeTick((n) => n + 1);
+    if (orderFreezeTimerRef.current) clearTimeout(orderFreezeTimerRef.current);
+    orderFreezeTimerRef.current = setTimeout(() => {
+      frozenOrderIdsRef.current = null;
+      orderFreezeTimerRef.current = null;
+      setOrderFreezeTick((n) => n + 1);
+    }, 700);
+  };
+
+  // Sem foto local (/uploads/), pede refresh (CDN ou vazio) — debounce evita rajada no clique.
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const needsRefresh = (url: string | null | undefined) => {
+        if (!url) return true;
+        return !url.includes('/uploads/');
+      };
+      const missing = searchedRaw
+        .map((t) => t.contact)
+        .filter(
+          (c): c is NonNullable<typeof c> =>
+            !!c?.id && needsRefresh(c.profile_pic_url),
+        )
+        .filter((c) => !photoRefreshAttempted.current.has(c.id));
+
+      for (const contact of missing.slice(0, 8)) {
+        photoRefreshAttempted.current.add(contact.id);
+        void api(`/whatsapp/contacts/${contact.id}/refresh-photo`, { method: 'POST' }).catch(
+          () => {
+            /* silencioso — privacidade WA / timeout */
+          },
+        );
       }
-    }
-  }, [ticketsWithAgenda, selectedTicket]);
+    }, 800);
+    return () => window.clearTimeout(timer);
+  }, [searchedRaw]);
+
+  const selectedTicketId = selectedTicket?.id ?? null;
+  useEffect(() => {
+    if (!selectedTicketId) return;
+    const updated = ticketsWithAgenda.find((t) => t.id === selectedTicketId);
+    if (!updated) return;
+    setSelectedTicket((prev) => {
+      if (!prev || prev.id !== updated.id) return prev;
+      return selectionNeedsSync(prev, updated) ? updated : prev;
+    });
+  }, [ticketsWithAgenda, selectedTicketId]);
 
   useEffect(() => {
-    onSelectedTicketChange?.(selectedTicket?.id ?? null);
-  }, [selectedTicket?.id, onSelectedTicketChange]);
+    onSelectedTicketChange?.(selectedTicketId);
+  }, [selectedTicketId, onSelectedTicketChange]);
 
   useEffect(() => {
     if (!preselectedTicketId) return;
@@ -367,6 +437,7 @@ export function ChatView({ preselectedTicketId, onConsumePreselect, onSelectedTi
   }, [preselectedTicketId, ticketsWithAgenda, onConsumePreselect]);
 
   const handleSelectTicket = (ticket: Ticket) => {
+    freezeListOrder();
     setSelectedTicket(ticket);
     if (ticket.unread_count > 0) {
       void api(`/tickets/${ticket.id}/read`, { method: 'PATCH' }).catch(() => {});
@@ -384,13 +455,17 @@ export function ChatView({ preselectedTicketId, onConsumePreselect, onSelectedTi
           method: 'POST',
           body: JSON.stringify({ assume: true }),
         });
-        if (created) setSelectedTicket(mapTicket(created));
+        const mapped = upsertTicketFromApi(created) ?? (created ? mapTicket(created) : null);
+        if (mapped) setSelectedTicket(mapped);
         return;
       }
       const updated = await api<any>(`/tickets/${ticket.id}/assign`, { method: 'PATCH' });
-      if (updated) setSelectedTicket(mapTicket(updated));
+      const mapped = upsertTicketFromApi(updated) ?? (updated ? mapTicket(updated) : null);
+      if (mapped) setSelectedTicket(mapped);
     } catch (err) {
       console.error('Error assigning ticket:', err);
+      const msg = err instanceof Error ? err.message : 'Falha ao assumir atendimento';
+      alert(msg);
     }
   };
 
@@ -578,6 +653,7 @@ export function ChatView({ preselectedTicketId, onConsumePreselect, onSelectedTi
 
         <div
           className="flex-1 overflow-y-auto"
+          onPointerDownCapture={freezeListOrder}
           onScroll={(e) => {
             if (!hasMoreFinished || loadingMore) return;
             // Todos e Finalizados dependem do histórico fechado paginado.

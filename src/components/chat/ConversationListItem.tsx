@@ -152,13 +152,22 @@ export function ConversationListItem({
         {ticket.tags && ticket.tags.length > 0 && (
           <div className="flex items-center gap-1 mt-1 flex-wrap">
             {ticket.tags.slice(0, 3).map((tag) => (
-              <button
+              <span
                 key={tag.id}
+                role="button"
+                tabIndex={0}
                 onClick={(e) => {
                   e.stopPropagation();
                   onTagClick(tag.id);
                 }}
-                className="w-2 h-2 rounded-full hover:scale-125 transition-transform"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onTagClick(tag.id);
+                  }
+                }}
+                className="w-2 h-2 rounded-full hover:scale-125 transition-transform cursor-pointer"
                 style={{ background: tag.color }}
                 title={tag.name}
               />

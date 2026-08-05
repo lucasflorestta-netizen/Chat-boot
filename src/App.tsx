@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { AuthProvider } from './context/AuthContext';
 import { useAuth } from './context/useAuth';
 import { WhatsappConnectionProvider } from './context/WhatsappConnectionContext';
@@ -256,6 +256,9 @@ function AuthenticatedApp() {
       setActiveTab('chat');
     } catch (err) {
       console.error('Erro ao aceitar transferência:', err);
+      const msg =
+        err instanceof Error ? err.message : 'Falha ao aceitar transferência';
+      alert(msg);
     } finally {
       setTransferBusy(false);
     }
@@ -526,6 +529,21 @@ function AuthenticatedApp() {
     }
   }, [lockToWhatsapp, activeTab]);
 
+  const myActiveCount = useMemo(
+    () =>
+      profile
+        ? tickets.filter(
+            (t) => t.assigned_to === profile.id && t.status === 'attending',
+          ).length
+        : 0,
+    [tickets, profile],
+  );
+  const transferQueueFull = Boolean(
+    profile &&
+      profile.max_concurrent_chats > 0 &&
+      myActiveCount >= profile.max_concurrent_chats,
+  );
+
   if (!profile) return null;
 
   const guardedTab = (tab: TabId): TabId => {
@@ -625,6 +643,9 @@ function AuthenticatedApp() {
         <TransferAcceptModal
           ticket={pendingTransfer}
           busy={transferBusy}
+          queueFull={transferQueueFull}
+          activeCount={myActiveCount}
+          maxConcurrent={profile.max_concurrent_chats}
           onAccept={() => void handleAcceptTransfer()}
           onReject={() => void handleRejectTransfer()}
         />

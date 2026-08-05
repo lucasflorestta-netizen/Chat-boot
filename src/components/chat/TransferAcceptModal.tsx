@@ -1,9 +1,13 @@
-import { ArrowRightCircle, X } from 'lucide-react';
+import { ArrowRightCircle, AlertTriangle, X } from 'lucide-react';
 import type { Ticket } from '../../types';
 
 interface TransferAcceptModalProps {
   ticket: Ticket;
   busy?: boolean;
+  /** Destino já está no limite (ou acima) de atendimentos simultâneos. */
+  queueFull?: boolean;
+  activeCount?: number;
+  maxConcurrent?: number;
   onAccept: () => void;
   onReject: () => void;
   onDismiss?: () => void;
@@ -12,6 +16,9 @@ interface TransferAcceptModalProps {
 export function TransferAcceptModal({
   ticket,
   busy,
+  queueFull,
+  activeCount,
+  maxConcurrent,
   onAccept,
   onReject,
   onDismiss,
@@ -20,6 +27,7 @@ export function TransferAcceptModal({
     ticket.pending_transfer_from_agent?.name?.trim() ||
     'Um agente';
   const contactName = ticket.contact?.name?.trim() || 'Cliente';
+  const protocolo = ticket.protocolo?.trim() || null;
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60] animate-fade-in">
@@ -42,12 +50,31 @@ export function TransferAcceptModal({
             </button>
           )}
         </div>
-        <p className="text-sm text-ink-200 mb-4 leading-relaxed">
+        <p className="text-sm text-ink-200 mb-3 leading-relaxed">
           <span className="text-white font-medium">{fromName}</span> quer
           transferir a conversa de{' '}
-          <span className="text-white font-medium">{contactName}</span> para
-          você. Aceitar?
+          <span className="text-white font-medium">{contactName}</span>
+          {protocolo ? (
+            <>
+              {' '}
+              <span className="text-ink-400">({protocolo})</span>
+            </>
+          ) : null}{' '}
+          para você. Aceitar?
         </p>
+        {queueFull && (
+          <div className="mb-4 flex gap-2 rounded-lg border border-warning-500/40 bg-warning-500/10 px-3 py-2 text-xs text-warning-200 leading-relaxed">
+            <AlertTriangle className="w-4 h-4 text-warning-400 flex-shrink-0 mt-0.5" />
+            <p>
+              Sua fila está cheia
+              {typeof activeCount === 'number' &&
+              typeof maxConcurrent === 'number'
+                ? ` (${activeCount}/${maxConcurrent})`
+                : ''}
+              . Ao aceitar, você assume este atendimento mesmo assim.
+            </p>
+          </div>
+        )}
         <div className="flex gap-2">
           <button
             type="button"
@@ -63,7 +90,7 @@ export function TransferAcceptModal({
             disabled={busy}
             className="flex-1 px-3 py-2 rounded-lg text-sm font-medium bg-brand-600 hover:bg-brand-500 text-white disabled:opacity-50"
           >
-            Aceitar
+            {queueFull ? 'Aceitar mesmo assim' : 'Aceitar'}
           </button>
         </div>
       </div>

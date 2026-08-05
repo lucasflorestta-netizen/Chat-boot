@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useContacts } from '../../hooks/useData';
+import { useContacts, upsertTicketFromApi } from '../../hooks/useData';
 import { useWhatsappConnection } from '../../context/useWhatsappConnection';
 import { api } from '../../lib/api';
 import {
@@ -226,13 +226,14 @@ export function ContactsView({ onStartConversation }: ContactsViewProps) {
     setError(null);
     setStarting(true);
     try {
-      const ticket = await api<{ id: string }>(`/contacts/${contact.id}/start-conversation`, {
+      const ticket = await api<Record<string, unknown>>(`/contacts/${contact.id}/start-conversation`, {
         method: 'POST',
         body: JSON.stringify({ assume: true }),
       });
+      upsertTicketFromApi(ticket);
       setConfirmAssume(false);
       setSelected(null);
-      onStartConversation(ticket.id);
+      onStartConversation(String(ticket.id));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Falha ao iniciar conversa');
       setConfirmAssume(false);

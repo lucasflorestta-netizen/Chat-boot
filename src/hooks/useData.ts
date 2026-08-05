@@ -35,8 +35,6 @@ function upsertById<T extends { id: string }>(list: T[], item: T): T[] {
   return next;
 }
 
-/** Evita tela piscando ao voltar para Chat / Tickets (remount). */
-let ticketsCache: Ticket[] = [];
 const FINISHED_PAGE_SIZE = 80;
 
 type TicketsPage = {
@@ -44,6 +42,51 @@ type TicketsPage = {
   hasMore: boolean;
   nextOffset: number | null;
 };
+
+type TicketsStoreState = {
+  tickets: Ticket[];
+  loading: boolean;
+  loadingMore: boolean;
+  hasMoreFinished: boolean;
+};
+
+/** Store único: App + ChatView compartilham o mesmo estado/socket (sem listeners duplicados). */
+const ticketsListeners = new Set<() => void>();
+let ticketsStore: TicketsStoreState = {
+  tickets: [],
+  loading: true,
+  loadingMore: false,
+  hasMoreFinished: false,
+};
+let finishedOffset = 0;
+let ticketsSocketBound = false;
+let ticketsFetchPromise: Promise<void> | null = null;
+
+function emitTicketsStore() {
+  for (const listener of ticketsListeners) listener();
+}
+
+function patchTicketsStore(partial: Partial<TicketsStoreState>) {
+  ticketsStore = { ...ticketsStore, ...partial };
+  emitTicketsStore();
+}
+
+function setTicketsList(next: Ticket[]) {
+  patchTicketsStore({ tickets: next });
+}
+
+/**
+ * Atualiza a lista local com o ticket da API (assign/finish/etc).
+ * Evita depender só do WebSocket para a aba Meus / Triagem refletir na hora.
+ */
+export function upsertTicketFromApi(raw: unknown): Ticket | null {
+  if (!raw || typeof raw !== 'object' || !('id' in raw) || !(raw as { id?: unknown }).id) {
+    return null;
+  }
+  const mapped = mapTicket(raw);
+  setTicketsList(upsertById(ticketsStore.tickets, mapped));
+  return mapped;
+}
 
 function parseTicketsResponse(data: unknown): TicketsPage {
   if (Array.isArray(data)) {
@@ -69,14 +112,54 @@ function mergeTicketsById(existing: Ticket[], incoming: Ticket[]): Ticket[] {
   return [...byId.values()];
 }
 
-export function useTickets(_filter?: { status?: string; department?: string; assignedTo?: string }) {
-  const [tickets, setTickets] = useState<Ticket[]>(() => ticketsCache);
-  const [loading, setLoading] = useState(() => ticketsCache.length === 0);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [hasMoreFinished, setHasMoreFinished] = useState(false);
-  const finishedOffsetRef = useRef(0);
+function mergeMessageIntoTicket(
+  existing: Ticket,
+  rawTicket: any | undefined,
+  rawMessage: any | undefined,
+): Ticket {
+  const mapped = rawTicket ? mapTicket(rawTicket) : existing;
+  const mappedMsg = rawMessage ? mapMessage(rawMessage) : null;
+  const fromEvent = mappedMsg
+    ? {
+        id: mappedMsg.id,
+        body: mappedMsg.body,
+        media_type: mappedMsg.media_type,
+        sender_type: mappedMsg.sender_type,
+        created_at: mappedMsg.created_at,
+        deleted_by_client: mappedMsg.deleted_by_client,
+        deleted_for_client: mappedMsg.deleted_for_client,
+      }
+    : null;
+  return {
+    ...existing,
+    ...mapped,
+    contact: mapped.contact
+      ? {
+          ...existing.contact,
+          ...mapped.contact,
+          // Mantém o relógio do WA alinhado à última msg (ordem Tudo).
+          wa_conversation_at:
+            fromEvent?.created_at ??
+            mapped.contact.wa_conversation_at ??
+            existing.contact?.wa_conversation_at ??
+            null,
+        }
+      : existing.contact,
+    assigned_agent: mapped.assigned_agent ?? existing.assigned_agent,
+    pending_transfer_to_agent:
+      mapped.pending_transfer_to_agent ?? existing.pending_transfer_to_agent,
+    pending_transfer_from_agent:
+      mapped.pending_transfer_from_agent ?? existing.pending_transfer_from_agent,
+    tags: mapped.tags?.length ? mapped.tags : existing.tags,
+    last_message: mapped.last_message ?? fromEvent ?? existing.last_message,
+    last_message_at:
+      fromEvent?.created_at ?? mapped.last_message_at ?? existing.last_message_at,
+  };
+}
 
-  const fetchTickets = useCallback(async () => {
+async function fetchTicketsStore() {
+  if (ticketsFetchPromise) return ticketsFetchPromise;
+  ticketsFetchPromise = (async () => {
     try {
       // 1) Abertos (conjunto pequeno) — operação não depende de histórico fechado.
       // 2) Finalizados paginados + dedupe no servidor (1 card por contato).
@@ -92,189 +175,162 @@ export function useTickets(_filter?: { status?: string; department?: string; ass
         (openPage.items || []).map(mapTicket),
         (finishedPage.items || []).map(mapTicket),
       );
-      ticketsCache = mapped;
-      finishedOffsetRef.current = finishedPage.nextOffset ?? finishedPage.items.length;
-      setHasMoreFinished(finishedPage.hasMore);
-      setTickets(mapped);
+      finishedOffset = finishedPage.nextOffset ?? finishedPage.items.length;
+      patchTicketsStore({
+        tickets: mapped,
+        hasMoreFinished: finishedPage.hasMore,
+        loading: false,
+      });
     } catch (err) {
       console.error('Error fetching tickets:', err);
+      patchTicketsStore({ loading: false });
     } finally {
-      setLoading(false);
+      ticketsFetchPromise = null;
     }
+  })();
+  return ticketsFetchPromise;
+}
+
+async function loadMoreFinishedStore() {
+  if (ticketsStore.loadingMore || !ticketsStore.hasMoreFinished) return;
+  patchTicketsStore({ loadingMore: true });
+  try {
+    const offset = finishedOffset;
+    const raw = await api<unknown>(
+      `/tickets?inbox=finalizados&contactDedupe=true&limit=${FINISHED_PAGE_SIZE}&offset=${offset}`,
+    );
+    const page = parseTicketsResponse(raw);
+    const mapped = (page.items || []).map(mapTicket);
+    const next = mergeTicketsById(ticketsStore.tickets, mapped);
+    finishedOffset = page.nextOffset ?? offset + mapped.length;
+    patchTicketsStore({
+      tickets: next,
+      hasMoreFinished: page.hasMore,
+      loadingMore: false,
+    });
+  } catch (err) {
+    console.error('Error loading more finished tickets:', err);
+    patchTicketsStore({ loadingMore: false });
+  }
+}
+
+function bindTicketsSocket() {
+  if (ticketsSocketBound) return;
+  ticketsSocketBound = true;
+  const socket = connectSocket();
+
+  const onCreated = (payload: { ticket: any }) => {
+    if (!payload?.ticket) return;
+    setTicketsList(upsertById(ticketsStore.tickets, mapTicket(payload.ticket)));
+  };
+  const onUpdated = (payload: { ticket: any }) => {
+    if (!payload?.ticket) return;
+    setTicketsList(upsertById(ticketsStore.tickets, mapTicket(payload.ticket)));
+  };
+  const onMessage = (payload: { ticket?: any; message?: any }) => {
+    const rawTicket = payload?.ticket;
+    const ticketId = rawTicket?.id ?? payload?.message?.ticketId;
+    if (!ticketId) return;
+
+    const prev = ticketsStore.tickets;
+    const idx = prev.findIndex((t) => t.id === ticketId);
+    if (idx === -1) {
+      if (!rawTicket) return;
+      setTicketsList(upsertById(prev, mapTicket(rawTicket)));
+      return;
+    }
+
+    // Atualiza no lugar: a UI reordena por activityAt (com freeze no clique).
+    const next = [...prev];
+    next[idx] = mergeMessageIntoTicket(prev[idx], rawTicket, payload?.message);
+    setTicketsList(next);
+  };
+  const onContact = (payload?: { contact?: any }) => {
+    // Sem contact no payload: não refetch (user.updated / payloads vazios geravam thrash).
+    if (!payload?.contact) return;
+    const mapped = mapContact(payload.contact);
+    setTicketsList(
+      ticketsStore.tickets.map((t) => {
+        if (t.contact_id !== mapped.id && t.contact?.id !== mapped.id) {
+          return t;
+        }
+        return {
+          ...t,
+          contact: {
+            ...(t.contact ?? {
+              id: mapped.id,
+              name: mapped.name,
+              phone: mapped.phone,
+              whatsapp_lid: mapped.whatsapp_lid,
+              profile_pic_url: null,
+              notes: null,
+              wa_conversation_at: null,
+              wa_archived: false,
+              created_at: mapped.created_at,
+              updated_at: mapped.updated_at,
+            }),
+            ...mapped,
+          },
+        };
+      }),
+    );
+  };
+
+  socket.on('ticket.created', onCreated);
+  socket.on('ticket.updated', onUpdated);
+  socket.on('ticket_updated', onUpdated);
+  socket.on('ticket.transfer.requested', onUpdated);
+  socket.on('ticket.transfer.accepted', onUpdated);
+  socket.on('ticket.transfer.rejected', onUpdated);
+  socket.on('ticket.transfer.cancelled', onUpdated);
+  socket.on('message.created', onMessage);
+  socket.on('new_message', onMessage);
+  socket.on('contact.updated', onContact);
+}
+
+export function useTickets(_filter?: { status?: string; department?: string; assignedTo?: string }) {
+  const [, setVersion] = useState(0);
+
+  useEffect(() => {
+    const onChange = () => setVersion((v) => v + 1);
+    const becameFirstSubscriber = ticketsListeners.size === 0;
+    ticketsListeners.add(onChange);
+    bindTicketsSocket();
+    // Primeiro subscriber (ex.: login) ou lista vazia → fetch; demais compartilham o store.
+    if (becameFirstSubscriber || ticketsStore.tickets.length === 0) {
+      void fetchTicketsStore();
+    }
+    return () => {
+      ticketsListeners.delete(onChange);
+      // Logout / unmount total: limpa cache para o próximo login não ver tickets alheios.
+      if (ticketsListeners.size === 0) {
+        ticketsStore = {
+          tickets: [],
+          loading: true,
+          loadingMore: false,
+          hasMoreFinished: false,
+        };
+        finishedOffset = 0;
+        ticketsFetchPromise = null;
+      }
+    };
   }, []);
 
-  const loadMoreFinished = useCallback(async () => {
-    if (loadingMore || !hasMoreFinished) return;
-    setLoadingMore(true);
-    try {
-      const offset = finishedOffsetRef.current;
-      const raw = await api<unknown>(
-        `/tickets?inbox=finalizados&contactDedupe=true&limit=${FINISHED_PAGE_SIZE}&offset=${offset}`,
-      );
-      const page = parseTicketsResponse(raw);
-      const mapped = (page.items || []).map(mapTicket);
-      setTickets((prev) => {
-        const next = mergeTicketsById(prev, mapped);
-        ticketsCache = next;
-        return next;
-      });
-      finishedOffsetRef.current = page.nextOffset ?? offset + mapped.length;
-      setHasMoreFinished(page.hasMore);
-    } catch (err) {
-      console.error('Error loading more finished tickets:', err);
-    } finally {
-      setLoadingMore(false);
-    }
-  }, [loadingMore, hasMoreFinished]);
+  const loadMoreFinished = useCallback(() => {
+    void loadMoreFinishedStore();
+  }, []);
 
-  useEffect(() => {
-    void fetchTickets();
-  }, [fetchTickets]);
-
-  useEffect(() => {
-    const socket = connectSocket();
-
-    const sync = (next: Ticket[]) => {
-      ticketsCache = next;
-      return next;
-    };
-
-    const onCreated = (payload: { ticket: any }) => {
-      if (!payload?.ticket) return;
-      setTickets((prev) => sync(upsertById(prev, mapTicket(payload.ticket))));
-    };
-    const onUpdated = (payload: { ticket: any }) => {
-      if (!payload?.ticket) return;
-      setTickets((prev) => sync(upsertById(prev, mapTicket(payload.ticket))));
-    };
-    const onMessage = (payload: { ticket?: any; message?: any }) => {
-      const rawTicket = payload?.ticket;
-      const ticketId = rawTicket?.id ?? payload?.message?.ticketId;
-      if (!ticketId) return;
-
-      setTickets((prev) => {
-        const idx = prev.findIndex((t) => t.id === ticketId);
-        if (idx === -1) {
-          if (!rawTicket) return prev;
-          return sync(upsertById(prev, mapTicket(rawTicket)));
-        }
-
-        const existing = prev[idx];
-        const mapped = rawTicket ? mapTicket(rawTicket) : existing;
-        const mappedMsg = payload?.message ? mapMessage(payload.message) : null;
-        const fromEvent = mappedMsg
-          ? {
-              id: mappedMsg.id,
-              body: mappedMsg.body,
-              media_type: mappedMsg.media_type,
-              sender_type: mappedMsg.sender_type,
-              created_at: mappedMsg.created_at,
-              deleted_by_client: mappedMsg.deleted_by_client,
-              deleted_for_client: mappedMsg.deleted_for_client,
-            }
-          : null;
-        const merged = {
-          ...existing,
-          ...mapped,
-          contact: mapped.contact
-            ? {
-                ...existing.contact,
-                ...mapped.contact,
-                // Mantém o relógio do WA alinhado à última msg (ordem Tudo).
-                wa_conversation_at:
-                  fromEvent?.created_at ??
-                  mapped.contact.wa_conversation_at ??
-                  existing.contact?.wa_conversation_at ??
-                  null,
-              }
-            : existing.contact,
-          assigned_agent: mapped.assigned_agent ?? existing.assigned_agent,
-          pending_transfer_to_agent:
-            mapped.pending_transfer_to_agent ?? existing.pending_transfer_to_agent,
-          pending_transfer_from_agent:
-            mapped.pending_transfer_from_agent ??
-            existing.pending_transfer_from_agent,
-          tags: mapped.tags?.length ? mapped.tags : existing.tags,
-          last_message: mapped.last_message ?? fromEvent ?? existing.last_message,
-          last_message_at:
-            fromEvent?.created_at ??
-            mapped.last_message_at ??
-            existing.last_message_at,
-        };
-        const next = [...prev];
-        next.splice(idx, 1);
-        return sync([merged, ...next]);
-      });
-    };
-    const onContact = (payload?: { contact?: any }) => {
-      if (!payload?.contact) {
-        void fetchTickets();
-        return;
-      }
-      const mapped = mapContact(payload.contact);
-      setTickets((prev) =>
-        sync(
-          prev.map((t) => {
-          if (t.contact_id !== mapped.id && t.contact?.id !== mapped.id) {
-            return t;
-          }
-          return {
-            ...t,
-            contact: {
-              ...(t.contact ?? {
-                id: mapped.id,
-                name: mapped.name,
-                phone: mapped.phone,
-                whatsapp_lid: mapped.whatsapp_lid,
-                profile_pic_url: null,
-                notes: null,
-                wa_conversation_at: null,
-                wa_archived: false,
-                created_at: mapped.created_at,
-                updated_at: mapped.updated_at,
-              }),
-              ...mapped,
-            },
-          };
-        }),
-        ),
-      );
-    };
-
-    socket.on('ticket.created', onCreated);
-    socket.on('ticket.updated', onUpdated);
-    socket.on('ticket_updated', onUpdated);
-    socket.on('ticket.transfer.requested', onUpdated);
-    socket.on('ticket.transfer.accepted', onUpdated);
-    socket.on('ticket.transfer.rejected', onUpdated);
-    socket.on('ticket.transfer.cancelled', onUpdated);
-    socket.on('message.created', onMessage);
-    socket.on('new_message', onMessage);
-    socket.on('contact.updated', onContact);
-    socket.on('user.updated', onContact);
-
-    return () => {
-      socket.off('ticket.created', onCreated);
-      socket.off('ticket.updated', onUpdated);
-      socket.off('ticket_updated', onUpdated);
-      socket.off('ticket.transfer.requested', onUpdated);
-      socket.off('ticket.transfer.accepted', onUpdated);
-      socket.off('ticket.transfer.rejected', onUpdated);
-      socket.off('ticket.transfer.cancelled', onUpdated);
-      socket.off('message.created', onMessage);
-      socket.off('new_message', onMessage);
-      socket.off('contact.updated', onContact);
-      socket.off('user.updated', onContact);
-    };
-  }, [fetchTickets]);
+  const refetch = useCallback(() => {
+    void fetchTicketsStore();
+  }, []);
 
   return {
-    tickets,
-    loading,
-    loadingMore,
-    hasMoreFinished,
+    tickets: ticketsStore.tickets,
+    loading: ticketsStore.loading,
+    loadingMore: ticketsStore.loadingMore,
+    hasMoreFinished: ticketsStore.hasMoreFinished,
     loadMoreFinished,
-    refetch: fetchTickets,
+    refetch,
   };
 }
 
@@ -283,16 +339,29 @@ export function useMessages(ticketId: string | null) {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (!ticketId) return;
+    if (!ticketId) {
+      setMessages([]);
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
     setLoading(true);
     setMessages([]);
     api<any>(`/tickets/${ticketId}`)
       .then((ticket) => {
+        if (cancelled) return;
         const msgs = (ticket.messages || []).map(mapMessage);
         setMessages(msgs);
       })
-      .catch((err) => console.error('Error fetching messages:', err))
-      .finally(() => setLoading(false));
+      .catch((err) => {
+        if (!cancelled) console.error('Error fetching messages:', err);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [ticketId]);
 
   useEffect(() => {

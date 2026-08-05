@@ -428,14 +428,18 @@ export function AutoMessagesView() {
 
           <SettingCard
             icon={<Users className="w-4 h-4" />}
-            title="Mensagem quando agente não responde"
+            title="Mensagem de fila (agentes ocupados)"
           >
             <textarea
               value={form.agents_busy_message}
               onChange={(e) => setForm({ ...form, agents_busy_message: e.target.value })}
               className="input h-10 resize-none !py-1.5 text-xs"
-              placeholder="Todos os nossos atendentes estão ocupados no momento. Aguarde na fila que em breve você será atendido."
+              placeholder="Todos os nossos atendentes estão ocupados no momento. Você é o {{posicao}}º da fila. Em breve você será atendido."
             />
+            <p className="mt-1 text-[10px] text-ink-300 leading-tight">
+              Use {'{{posicao}}'} (posição na fila do setor). Também {'{{protocol}}'} /{' '}
+              {'{{protocolName}}'}. Vazio = desligado.
+            </p>
           </SettingCard>
 
           {/* Linha 3 — Protocolo + NPS + Offline */}

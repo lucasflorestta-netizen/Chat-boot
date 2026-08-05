@@ -643,12 +643,16 @@ export function ChatDetail({
   const isFinished = ticket.status === 'finished';
   const canInteract = !isFinished && isAssignedToMe;
   const needsAssume = !isFinished && !ticket.assigned_to;
-  /** Header: assumir fila vazia OU reabrir ticket finalizado. */
-  const showAssumeInHeader = needsAssume || isFinished;
+  const isAdmin = profile?.role === 'admin' || profile?.apiRole === 'ADMIN';
+  /** ADMIN pode assumir atendimento de outro operador a qualquer momento. */
+  const canAdminTakeover =
+    isAdmin && !isFinished && !!ticket.assigned_to && !isAssignedToMe;
+  /** Header: fila vazia, reabrir finalizado, ou takeover admin. */
+  const showAssumeInHeader = needsAssume || isFinished || canAdminTakeover;
   const isMirrorMode =
-    profile?.role === 'admin' &&
+    isAdmin &&
     !!ticket.assigned_to &&
-    ticket.assigned_to !== profile.id;
+    ticket.assigned_to !== profile?.id;
 
   const onDragEnter = (e: React.DragEvent) => {
     if (!canInteract) return;
@@ -1104,7 +1108,9 @@ export function ChatDetail({
         </div>
       ) : isMirrorMode ? (
         <div className="border-t border-ink-700 bg-ink-900 p-4 text-center text-sm text-ink-300">
-          Modo leitura — assuma ou transfira o atendimento para responder.
+          Modo leitura — use{' '}
+          <span className="text-white font-medium">Assumir atendimento</span> no
+          topo para responder (ou transfira para outro agente).
         </div>
       ) : (
         <div className={`relative ${canInteract ? undefined : 'opacity-60'}`}>
