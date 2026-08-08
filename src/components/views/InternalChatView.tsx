@@ -110,7 +110,12 @@ export function InternalChatView() {
   const [recentStickers, setRecentStickers] = useState<RecentSticker[]>(() =>
     loadRecentStickers(),
   );
+  const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const stickToBottomRef = useRef(true);
+  /** Abertura da conversa: ir direto à última mensagem (como no atendimento). */
+  const pendingInitialScrollRef = useRef(false);
+  const prevMsgCountRef = useRef(0);
   const dragDepthRef = useRef(0);
   const typingTimer = useRef<number | null>(null);
 
@@ -123,15 +128,66 @@ export function InternalChatView() {
     localWallpaper?.customImageUrl ?? appearance?.customImageUrl ?? null;
   const wallpaper = resolveWallpaper(wallpaperKey, customImageUrl);
 
+  const jumpToBottomInstant = useCallback(() => {
+    const el = scrollRef.current;
+    if (el) {
+      el.scrollTop = el.scrollHeight;
+    } else {
+      bottomRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' });
+    }
+    stickToBottomRef.current = true;
+  }, []);
+
+  const scrollToBottom = useCallback(
+    (behavior: ScrollBehavior = 'smooth') => {
+      if (behavior === 'auto') {
+        jumpToBottomInstant();
+        return;
+      }
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      stickToBottomRef.current = true;
+    },
+    [jumpToBottomInstant],
+  );
+
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages.length, typingUserIds.length]);
+    if (messagesLoading) return;
+
+    if (pendingInitialScrollRef.current) {
+      pendingInitialScrollRef.current = false;
+      prevMsgCountRef.current = messages.length;
+      // Duplo rAF: espera o DOM pintar as bolhas antes de posicionar
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          jumpToBottomInstant();
+        });
+      });
+      return;
+    }
+
+    const grew = messages.length > prevMsgCountRef.current;
+    prevMsgCountRef.current = messages.length;
+    if (!grew && typingUserIds.length === 0) return;
+
+    if (stickToBottomRef.current) {
+      scrollToBottom(grew ? 'smooth' : 'auto');
+    }
+  }, [
+    messages,
+    messagesLoading,
+    typingUserIds.length,
+    jumpToBottomInstant,
+    scrollToBottom,
+  ]);
 
   useEffect(() => {
     setReplyingTo(null);
     setFileQueue([]);
     setFileError(null);
     setShowWallpaperPicker(false);
+    stickToBottomRef.current = true;
+    pendingInitialScrollRef.current = true;
+    prevMsgCountRef.current = 0;
   }, [selected?.id, selected?.peer?.id]);
 
   const filtered = useMemo(() => {
@@ -611,8 +667,15 @@ export function InternalChatView() {
           )}
 
           <div
+            ref={scrollRef}
             className={`flex-1 overflow-y-auto py-3 ${wallpaper.className}`}
             style={wallpaperStyle}
+            onScroll={() => {
+              const el = scrollRef.current;
+              if (!el) return;
+              const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+              stickToBottomRef.current = distance <= 120;
+            }}
           >
             {messagesLoading ? (
               <div className="flex justify-center py-10">
